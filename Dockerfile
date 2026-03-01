@@ -28,7 +28,9 @@ COPY --from=builder /install /usr/local
 COPY . .
 
 # 보안: root가 아닌 전용 유저로 실행
-RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1001 appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # 로그를 stdout으로 출력 (Docker 로그 드라이버가 수집)

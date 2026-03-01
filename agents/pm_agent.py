@@ -14,6 +14,7 @@ Final_Score = (Tech × 0.30) + (Fund × 0.35) + (Macro × 0.20) + (Sent × 0.15)
 """
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 from agents.gemini_client import call_gemini
 from agents.technical_agent import run_technical_agent
@@ -70,6 +71,12 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     """
     logger.info(f"[PM Agent] 전체 분석 시작: {ticker}")
 
+    # ── Step 0: 이전 분석 조회 (Memory Layer) ──────────────────────
+    # 분석 시작 전에 조회해야 save_analysis 이후 기록과 혼용되지 않음
+    from db.database import get_history
+    _prev_records = await get_history(ticker, 1)
+    _prev = _prev_records[0] if _prev_records else None
+
     # ── Step 1: 4개 전문가 Agent 순차 실행 ────────────────────────
     tech_result  = await run_technical_agent(ticker, period)
     fund_result  = await run_fundamental_agent(ticker)
@@ -114,6 +121,10 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
         f"= Final:{final_score} → {signal_text}"
     )
 
+    # ── Step 2.5: 이전 분석 대비 Delta 계산 ────────────────────────
+    _scores = {"tech": tech_score, "fund": fund_score, "macro": macro_score, "sent": sent_score}
+    delta = _compute_delta(final_score, signal_text, _scores, _prev)
+
     # ── Step 3: PM Agent Gemini 호출 ───────────────────────────────
     pm_prompt   = _build_pm_prompt(
         ticker, final_score, buy_signal,
@@ -121,6 +132,7 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
         fund_score, fund_result["report"],
         macro_score, macro_result["report"],
         sent_score, sent_result["report"],
+        delta=delta,
     )
     pm_response = await call_gemini(_SYSTEM, pm_prompt)
 
@@ -130,12 +142,13 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
             tech_score, fund_score, macro_score, sent_score,
         )
 
-    return {
+    result = {
         "ticker":        ticker,
         "final_score":   final_score,
         "buy_signal":    buy_signal,
         "signal_text":   signal_text,
         "safety_brake":  safety_brake,
+        "delta":         delta,
         "scores": {
             "tech":  tech_score,
             "fund":  fund_score,
@@ -156,6 +169,49 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
             "sent":  sent_result.get("raw_data", {}),
         },
     }
+    from db.database import save_analysis
+    await save_analysis(result)
+    return result
+
+
+# ── Delta 계산 ───────────────────────────────────────────────────────
+
+def _compute_delta(
+    final_score: float,
+    signal_text: str,
+    scores: dict,
+    prev: dict | None,
+) -> dict:
+    """이전 분석과 현재 분석을 비교해 변화량 딕셔너리를 반환."""
+    if not prev:
+        return {"has_prev": False}
+
+    prev_score  = prev["final_score"]
+    prev_signal = prev["signal_text"]
+    score_change = round(final_score - prev_score, 1)
+
+    dt_prev = datetime.fromisoformat(prev["analyzed_at"])
+    diff    = datetime.now(timezone.utc) - dt_prev
+    if diff < timedelta(hours=1):
+        analyzed_ago = f"{int(diff.total_seconds() / 60)}분 전"
+    elif diff < timedelta(days=1):
+        analyzed_ago = f"{int(diff.total_seconds() / 3600)}시간 전"
+    else:
+        analyzed_ago = f"{diff.days}일 전"
+
+    return {
+        "has_prev":          True,
+        "prev_score":        prev_score,
+        "score_change":      score_change,
+        "prev_signal":       prev_signal,
+        "signal_changed":    prev_signal != signal_text,
+        "score_tech_change": scores["tech"]  - prev["score_tech"],
+        "score_fund_change": scores["fund"]  - prev["score_fund"],
+        "score_macro_change":scores["macro"] - prev["score_macro"],
+        "score_sent_change": scores["sent"]  - prev["score_sent"],
+        "analyzed_ago":      analyzed_ago,
+        "prev_date":         dt_prev.strftime("%Y-%m-%d"),
+    }
 
 
 # ── 프롬프트 빌더 ────────────────────────────────────────────────────
@@ -166,6 +222,7 @@ def _build_pm_prompt(
     fund_score: int, fund_report: str,
     macro_score: int, macro_report: str,
     sent_score: int, sent_report: str,
+    delta: dict | None = None,
 ) -> str:
     signal_text = "★ 매수 신호" if buy_signal else "관망"
     threshold   = _buy_threshold()
@@ -173,8 +230,25 @@ def _build_pm_prompt(
     def trim(text: str, n: int = 450) -> str:
         return text[:n] + "..." if len(text) > n else text
 
-    return f"""종목코드: {ticker}
+    # delta 컨텍스트 블록 (이전 분석이 있을 때만)
+    delta_block = ""
+    if delta and delta.get("has_prev"):
+        chg = delta["score_change"]
+        sig_change = (
+            f"{delta['prev_signal']} → {signal_text} (신호 전환!)"
+            if delta["signal_changed"]
+            else f"{signal_text} 유지"
+        )
+        delta_block = f"""
+[이전 분석 대비 변화] ← {delta['analyzed_ago']} ({delta['prev_date']})
+- Final Score: {delta['prev_score']:.1f}점 → {final_score:.1f}점 ({chg:+.1f}점)
+- 신호 변화:   {sig_change}
+- 세부 변화:   기술적 {delta['score_tech_change']:+d}점 / 펀더멘털 {delta['score_fund_change']:+d}점 / 매크로 {delta['score_macro_change']:+d}점 / 감성 {delta['score_sent_change']:+d}점
+위 변화를 고려해 점수가 상승 또는 하락한 주요 원인을 한 문장으로 언급하세요.
+"""
 
+    return f"""종목코드: {ticker}
+{delta_block}
 [전문가 점수 요약]
 - 기술적 분석:    {tech_score}/100  × 30% = {tech_score * 0.30:.1f}점
 - 펀더멘털 분석:  {fund_score}/100  × 35% = {fund_score * 0.35:.1f}점

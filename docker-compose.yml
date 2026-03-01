@@ -15,9 +15,17 @@ services:
     environment:
       - TZ=Asia/Seoul
 
+    # DB 데이터 영속성: 컨테이너 재시작/재빌드 후에도 보존
+    volumes:
+      - stock_agent_data:/app/data
+
     # 로그 관리: 최대 10MB × 3개 파일 순환
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  stock_agent_data:
+    driver: local

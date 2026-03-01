@@ -19,12 +19,6 @@ logger = logging.getLogger("scheduler")
 
 KST = ZoneInfo("Asia/Seoul")
 
-WATCHLIST_KR: list[str] = [
-    t.strip()
-    for t in os.getenv("WATCHLIST_KR", "005930,000660,035420").split(",")
-    if t.strip()
-]
-
 THRESHOLD = int(os.getenv("SIGNAL_THRESHOLD_STRONG", "70"))
 
 
@@ -110,16 +104,18 @@ async def _notify_slack(result: dict) -> None:
 
 async def _run_watchlist_scan() -> None:
     """워치리스트 전 종목 스캔 — 매수 신호 종목 알림."""
+    from db.database import get_watchlist
+    from agents.pm_agent import run_full_analysis
+
+    watchlist = await get_watchlist()  # 매번 DB에서 읽어 런타임 변경 즉시 반영
     now_kst = datetime.now(KST)
     logger.info(
         f"[스케줄러] 워치리스트 스캔 시작: "
         f"{now_kst.strftime('%Y-%m-%d %H:%M KST')} "
-        f"| 종목 {len(WATCHLIST_KR)}개"
+        f"| 종목 {len(watchlist)}개"
     )
 
-    from agents.pm_agent import run_full_analysis
-
-    for ticker in WATCHLIST_KR:
+    for ticker in watchlist:
         try:
             logger.info(f"  분석 중: {ticker}")
             result = await run_full_analysis(ticker)

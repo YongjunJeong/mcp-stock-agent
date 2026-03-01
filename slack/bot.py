@@ -15,8 +15,11 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from db.database import get_watchlist, add_ticker, remove_ticker, get_history
 from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
@@ -133,6 +136,106 @@ def _parse_ticker(raw_text: str) -> str | None:
     return None
 
 
+# ── 워치리스트 명령 파서 ─────────────────────────────────────────────
+_CMD_ADD     = re.compile(r"^추가\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
+_CMD_REMOVE  = re.compile(r"^(?:제거|삭제)\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
+_CMD_LIST    = re.compile(r"^워치리스트$")
+_CMD_HISTORY = re.compile(r"^히스토리\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
+
+
+def _parse_command(text_clean: str) -> tuple[str, str | None] | None:
+    """
+    워치리스트 관리 명령 파싱.
+    Returns: ("add"|"remove"|"list"|"history", ticker_arg|None) or None
+    """
+    m = _CMD_ADD.match(text_clean)
+    if m:
+        return ("add", m.group(1))
+    m = _CMD_REMOVE.match(text_clean)
+    if m:
+        return ("remove", m.group(1))
+    if _CMD_LIST.match(text_clean):
+        return ("list", None)
+    m = _CMD_HISTORY.match(text_clean)
+    if m:
+        return ("history", m.group(1))
+    return None
+
+
+def _resolve_ticker_from_arg(arg: str) -> str | None:
+    """명령어 인자(6자리 코드 또는 회사명)를 ticker 코드로 변환."""
+    if re.match(r"^[0-9]{6}$", arg):
+        return arg
+    return COMPANY_MAP.get(arg)
+
+
+def _build_history_block(ticker: str, history: list[dict]) -> str:
+    """분석 히스토리 목록을 Slack mrkdwn 문자열로 포맷."""
+    KST = ZoneInfo("Asia/Seoul")
+    lines = [f"[ {ticker} 분석 히스토리 ]", "─────────────────────────────"]
+    for h in history:
+        dt_utc = datetime.fromisoformat(h["analyzed_at"])
+        dt_kst = dt_utc.astimezone(KST)
+        ts     = dt_kst.strftime("%m-%d %H:%M")
+        score  = h["final_score"]
+        signal = h["signal_text"]
+        lines.append(
+            f"`{ts}`  *{score}점*  {signal}  "
+            f"Tech:{h['score_tech']} Fund:{h['score_fund']} "
+            f"Macro:{h['score_macro']} Sent:{h['score_sent']}"
+        )
+    return "\n".join(lines)
+
+
+async def _handle_watchlist_command(
+    cmd: str, arg: str | None, say, thread: str
+) -> None:
+    """워치리스트 관리 명령을 처리하고 Slack에 응답합니다."""
+    if cmd == "list":
+        tickers = await get_watchlist()
+        if not tickers:
+            await say(thread_ts=thread, text="워치리스트가 비어있습니다.")
+            return
+        bullet = "\n".join(f"• `{t}`" for t in tickers)
+        await say(
+            thread_ts=thread,
+            text=f"*📋 워치리스트 ({len(tickers)}개)*\n{bullet}",
+        )
+        return
+
+    ticker = _resolve_ticker_from_arg(arg)
+    if not ticker:
+        await say(
+            thread_ts=thread,
+            text=(
+                f"❌ `{arg}` 종목을 찾을 수 없습니다.\n"
+                "6자리 코드로 입력해 주세요. (예: `@봇 추가 005930`)"
+            ),
+        )
+        return
+
+    if cmd == "add":
+        added = await add_ticker(ticker)
+        if added:
+            await say(thread_ts=thread, text=f"✅ `{ticker}` 워치리스트에 추가됐습니다.")
+        else:
+            await say(thread_ts=thread, text=f"ℹ️ `{ticker}` 은(는) 이미 워치리스트에 있습니다.")
+
+    elif cmd == "remove":
+        removed = await remove_ticker(ticker)
+        if removed:
+            await say(thread_ts=thread, text=f"🗑️ `{ticker}` 워치리스트에서 제거됐습니다.")
+        else:
+            await say(thread_ts=thread, text=f"ℹ️ `{ticker}` 은(는) 워치리스트에 없습니다.")
+
+    elif cmd == "history":
+        records = await get_history(ticker, 5)
+        if not records:
+            await say(thread_ts=thread, text=f"📭 `{ticker}` 분석 히스토리가 없습니다.")
+            return
+        await say(thread_ts=thread, text=_build_history_block(ticker, records))
+
+
 # ── 스코어 → 이모지 ──────────────────────────────────────────────────
 def _score_emoji(score: float) -> str:
     if score >= 70:
@@ -188,6 +291,16 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
 
         emoji = _score_emoji(final)
 
+        # ── Delta 텍스트 생성 ─────────────────────────────────
+        delta = result.get("delta", {})
+        delta_line = ""
+        if delta.get("has_prev"):
+            chg   = delta["score_change"]
+            arrow = "↑" if chg > 0 else ("↓" if chg < 0 else "→")
+            delta_line = f"\n{arrow} *전 분석({delta['analyzed_ago']}) 대비 {chg:+.1f}점*"
+            if delta.get("signal_changed"):
+                delta_line += f"  `{delta['prev_signal']} → {signal}`"
+
         # ── Slack Block Kit 구성 ─────────────────────────────
         blocks = [
             # 헤더
@@ -209,7 +322,7 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
                 ],
             },
             {"type": "divider"},
-            # Final Score
+            # Final Score + Delta
             {
                 "type": "section",
                 "text": {
@@ -217,6 +330,7 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
                     "text": (
                         f"*📊 Final Score: {final}/100* — {signal}\n"
                         f"`{_score_bar(int(final))}` {final}점"
+                        f"{delta_line}"
                     ),
                 },
             },
@@ -357,15 +471,21 @@ async def handle_mention(event, say):
                         "type": "mrkdwn",
                         "text": (
                             "*📈 멀티에이전트 주식 분석 봇 사용법*\n\n"
-                            "*종목 조회 (한국 주식):*\n"
+                            "*종목 분석 (한국 주식):*\n"
                             "• `@봇 삼성전자`\n"
                             "• `@봇 005930`\n"
                             "• `@봇 하이닉스 분석해줘`\n"
                             "• `@봇 카카오 사도 돼?`\n\n"
+                            "*워치리스트 관리:*\n"
+                            "• `@봇 워치리스트` → 현재 목록 조회\n"
+                            "• `@봇 추가 005930` → 종목 추가\n"
+                            "• `@봇 제거 005930` → 종목 제거\n"
+                            "• `@봇 히스토리 005930` → 최근 5회 분석 기록\n\n"
                             "*분석 구성:*\n"
-                            "• 📈 기술적 에이전트 (RSI, MACD, 패턴) × 40%\n"
-                            "• 📋 펀더멘털 에이전트 (PER, EPS) × 40%\n"
-                            "• 📰 감성 에이전트 (뉴스 심리) × 20%\n"
+                            "• 📈 기술적 에이전트 (RSI, MACD, 패턴) × 30%\n"
+                            "• 📋 펀더멘털 에이전트 (PER, EPS) × 35%\n"
+                            "• 🌐 매크로 에이전트 (환율·수급) × 20%\n"
+                            "• 📰 감성 에이전트 (뉴스 심리) × 15%\n"
                             "• 🏦 PM 에이전트 (종합 의견)\n\n"
                             "• `@봇 도움` → 이 메시지"
                         ),
@@ -375,16 +495,25 @@ async def handle_mention(event, say):
         )
         return
 
+    # 워치리스트 관리 명령 분기
+    cmd_result = _parse_command(text_clean)
+    if cmd_result:
+        cmd, arg = cmd_result
+        await _handle_watchlist_command(cmd, arg, say, thread)
+        return
+
     # 종목 분석
     ticker = _parse_ticker(text)
     if ticker is None:
         await say(
             thread_ts=thread,
             text=(
-                "종목을 인식하지 못했어요. 이렇게 입력해 보세요:\n"
-                "• `@봇 삼성전자`\n"
-                "• `@봇 005930`\n"
-                "• `@봇 도움` 으로 전체 사용법 확인"
+                "명령을 인식하지 못했어요. 이렇게 입력해 보세요:\n"
+                "• `@봇 삼성전자` / `@봇 005930` — 종목 분석\n"
+                "• `@봇 워치리스트` — 워치리스트 조회\n"
+                "• `@봇 추가 005930` / `@봇 제거 005930` — 워치리스트 수정\n"
+                "• `@봇 히스토리 005930` — 분석 기록 조회\n"
+                "• `@봇 도움` — 전체 사용법 확인"
             ),
         )
         return

@@ -23,6 +23,10 @@ logger = logging.getLogger("main")
 
 
 async def main():
+    from db.database import init_db
+    await init_db()
+    logger.info("DB 초기화 완료")
+
     from slack.bot import start_bot
     from scheduler.cron import create_scheduler
 
