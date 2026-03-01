@@ -10,7 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# pandas-ta는 pandas 버전을 과도하게 제한하므로 --no-deps로 별도 설치
+# (pandas-ta 자체 코드만 필요, numba 등 선택적 의존성 불필요)
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt && \
+    pip install --no-cache-dir --prefix=/install --no-deps pandas-ta
 
 
 # ── 런타임 스테이지: 최소 이미지 ──────────────────────────────────────
