@@ -44,23 +44,23 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Slack Bot (Socket Mode)                      │
-│   사용자 멘션(@봇 삼성전자) → 종목 파싱 → 분석 트리거                │
-│   결과를 Block Kit 카드로 실시간 전송 (로딩 메시지 → 결과로 교체)    │
+│                         Slack Bot (Socket Mode)                     │
+│   사용자 멘션(@봇 삼성전자) → 종목 파싱 → 분석 트리거                          │
+│   결과를 Block Kit 카드로 실시간 전송 (로딩 메시지 → 결과로 교체)               │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         PM Agent (종합 판단)                         │
-│                                                                      │
-│   Final_Score = Tech×0.30 + Fund×0.35 + Macro×0.20 + Sent×0.15     │
-│                                                                      │
+│                         PM Agent (종합 판단)                          │
+│                                                                     │
+│   Final_Score = Tech×0.30 + Fund×0.35 + Macro×0.20 + Sent×0.15      │
+│                                                                     │
 │   ┌─────────────────────────────────────────────────────────────┐   │
-│   │  Safety Brake: USD/KRW ≥ 1,450 + 3일 ROC > 1%             │   │
-│   │  → buy_signal 강제 False, Final Score 상한 35점            │   │
+│   │  Safety Brake: USD/KRW ≥ 1,450 + 3일 ROC > 1%                │   │
+│   │  → buy_signal 강제 False, Final Score 상한 35점                │   │
 │   └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│   투자 전략 블록 자동 생성: 진입가 · 목표가 · 손절 · 보유기간        │
+│                                                                     │
+│   투자 전략 블록 자동 생성: 진입가 · 목표가 · 손절 · 보유기간                   │
 └──────┬─────────────┬────────────────┬────────────────┬─────────────┘
        │             │                │                │
        ▼             ▼                ▼                ▼
@@ -74,8 +74,8 @@
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       MCP Tool 레이어 (6개 도구)                     │
-│  price │ technical │ pattern │ fundamental │ sentiment │ macro       │
+│                       MCP Tool 레이어 (6개 도구)                        │
+│  price │ technical │ pattern │ fundamental │ sentiment │ macro      │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │
               ┌──────────────────┴──────────────────┐
@@ -89,9 +89,9 @@
 
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  APScheduler (장중 자동 스캔)                        │
-│  평일 09:00 ~ 15:00 KST, 매 시간 정각                               │
-│  워치리스트 전 종목 분석 → Final Score ≥ 70 → Slack 채널 자동 알림  │
+│                  APScheduler (장중 자동 스캔)                           │
+│  평일 09:00 ~ 15:00 KST, 매 시간 정각                                   │
+│  워치리스트 전 종목 분석 → Final Score ≥ 70 → Slack 채널 자동 알림            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -296,22 +296,7 @@ mcp-stock-agent/
 
 ## 설치 및 실행
 
-### 사전 준비
-
-- Python 3.11 이상
-- Slack App (Bot Token `xoxb-`, App Token `xapp-`)
-- Google AI Studio API 키 (무료 티어 가능)
-
-### 설치
-
-```bash
-git clone https://github.com/YongjunJeong/mcp-stock-agent.git
-cd mcp-stock-agent
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 환경변수 설정
+### 환경변수 설정 (공통)
 
 ```bash
 cp .env.example .env
@@ -327,9 +312,33 @@ WATCHLIST_KR=005930,000660,035420
 SIGNAL_THRESHOLD_STRONG=70
 ```
 
-### 실행
+---
+
+### 방법 1 — Docker (권장)
+
+> Docker만 설치되어 있으면 Python 환경 설정 없이 바로 실행됩니다.
 
 ```bash
+git clone https://github.com/YongjunJeong/mcp-stock-agent.git
+cd mcp-stock-agent
+cp .env.example .env   # .env에 실제 키 입력
+
+docker compose up -d           # 백그라운드 실행
+docker compose logs -f         # 실시간 로그 확인
+docker compose down            # 종료
+```
+
+---
+
+### 방법 2 — Python 직접 실행 (로컬 개발용)
+
+```bash
+git clone https://github.com/YongjunJeong/mcp-stock-agent.git
+cd mcp-stock-agent
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # .env에 실제 키 입력
+
 python main.py
 ```
 

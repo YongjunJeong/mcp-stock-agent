@@ -1,0 +1,23 @@
+services:
+  bot:
+    build: .
+    image: mcp-stock-agent:latest
+    container_name: mcp-stock-agent
+
+    # 서버 재시작 또는 크래시 시 자동 복구
+    restart: unless-stopped
+
+    # .env 파일에서 환경변수 주입 (이미지에 포함되지 않음)
+    env_file:
+      - .env
+
+    # 한국 시간대 설정 (APScheduler KST 스케줄링)
+    environment:
+      - TZ=Asia/Seoul
+
+    # 로그 관리: 최대 10MB × 3개 파일 순환
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
