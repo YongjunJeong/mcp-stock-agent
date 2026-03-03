@@ -572,11 +572,3 @@ python main.py
 Final Score:                    46.2점  →  관망 (임계값: 70점)
 ```
 
----
-
-## 향후 개선 계획
-
-- **클라우드 배포** — Oracle Cloud VM, 24/7 프로덕션 운영
-- **Event-Driven Trigger** — 경제 캘린더 기반 자동 분석 (FOMC·한은 금통위 날짜 감지 → 매크로 에이전트 즉시 실행)
-- **Backtesting Agent** — 과거 시점 데이터를 Tool 레이어에 주입, 에이전트 판단 정확도 검증
-- **포지션 사이징** — Kelly Criterion 또는 고정 비율 자금 관리 모듈
