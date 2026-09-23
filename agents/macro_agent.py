@@ -9,7 +9,10 @@ Macro Agent
 - 달러 강세(원화 약세) = 외국인 이탈 → 지수 하방 압력
   단, 수출 비중 높은 종목(삼성전자, SK하이닉스 등)은 환율 상승이 매출 호재
 """
+import asyncio
 import logging
+import os
+import time
 
 from agents.gemini_client import call_gemini, extract_score
 from mcp_server.tools.macro import get_macro_indicators
@@ -79,16 +82,68 @@ SCORE: [0-100 사이 정수]
 0=Panic Zone+Safety Brake+VIX공포(매수 불가), 50=중립(뉴노멀), 100=원화강세+외국인대거유입+VIX안정.
 숫자만, 소수점 없이."""
 
+# ── 결과 캐시 ────────────────────────────────────────────────────────
+# 매크로 지표는 종목과 무관한데, 워치리스트 스캔은 종목마다 전체 분석을
+# 돌리므로 캐시가 없으면 같은 데이터를 종목 수만큼 다시 수집하고 LLM도
+# 매번 다시 호출합니다. 같은 입력에도 LLM 점수는 조금씩 달라서, 한 스캔
+# 안에서 종목끼리 비교할 때 매크로 노이즈가 섞이는 문제도 있었습니다.
+#
+# 환율(ECB 일별)과 미국 지수(일봉)는 분 단위로 바뀌지 않으므로
+# 짧은 TTL로 스캔 한 번 동안 결과를 공유합니다.
+_DEFAULT_TTL_SECONDS = 600
+
+_now = time.monotonic          # 테스트에서 시간을 조작하기 위한 진입점
+_cache: tuple[float, dict] | None = None
+_lock: asyncio.Lock | None = None
+_lock_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _ttl_seconds() -> int:
+    return int(os.getenv("MACRO_CACHE_TTL_SECONDS", str(_DEFAULT_TTL_SECONDS)))
+
+
+def _get_lock() -> asyncio.Lock:
+    """실행 중인 이벤트 루프에 묶인 락. 루프가 바뀌면 새로 만듭니다."""
+    global _lock, _lock_loop
+    loop = asyncio.get_running_loop()
+    if _lock is None or _lock_loop is not loop:
+        _lock, _lock_loop = asyncio.Lock(), loop
+    return _lock
+
+
+def clear_cache() -> None:
+    global _cache
+    _cache = None
+
+
 # ── 메인 함수 ────────────────────────────────────────────────────────
 
 async def run_macro_agent() -> dict:
     """
-    매크로 분석을 수행하고 점수와 리포트를 반환합니다.
+    매크로 분석 결과를 반환합니다. TTL 안에서는 캐시된 결과를 공유합니다.
     ticker 파라미터 없음 — 전체 시장 지표를 분석합니다.
+
+    동시에 여러 요청이 들어와도 락으로 묶어 실제 수집은 한 번만 합니다.
+    데이터 조회에 실패한 결과는 캐시하지 않아 다음 호출에서 다시 시도합니다.
+    반환값은 공유 객체이므로 호출 측에서 수정하지 않습니다.
 
     Returns:
         dict: {"score": int, "report": str, "raw_data": dict}
     """
+    global _cache
+    async with _get_lock():
+        if _cache is not None and _now() - _cache[0] < _ttl_seconds():
+            logger.info("[Macro Agent] 캐시된 결과 사용")
+            return _cache[1]
+
+        result = await _analyze()
+        if result["raw_data"]:
+            _cache = (_now(), result)
+        return result
+
+
+async def _analyze() -> dict:
+    """캐시 없이 매크로 지표를 수집하고 점수를 매깁니다."""
     logger.info("[Macro Agent] 분석 시작")
 
     # ── Step 1: Tool 직접 호출 ─────────────────────────────────────
