@@ -24,7 +24,7 @@ THRESHOLD = int(os.getenv("SIGNAL_THRESHOLD_STRONG", "70"))
 
 async def _notify_slack(result: dict) -> None:
     """매수 신호 발생 시 Slack 채널에 알림을 전송합니다."""
-    from slack_bot.bot import _to_slack_md, _score_emoji, _score_bar
+    from slack_bot.bot import _score_bar, _to_slack_md
 
     token      = os.getenv("SLACK_BOT_TOKEN")
     channel_id = os.getenv("SLACK_CHANNEL_ID")
@@ -37,7 +37,6 @@ async def _notify_slack(result: dict) -> None:
     signal  = result["signal_text"]
     scores  = result["scores"]
     reports = result["reports"]
-    emoji   = _score_emoji(final)
 
     # 가격 조회
     try:
@@ -104,8 +103,8 @@ async def _notify_slack(result: dict) -> None:
 
 async def _run_watchlist_scan() -> None:
     """워치리스트 전 종목 스캔 — 매수 신호 종목 알림."""
-    from db.database import get_watchlist
     from agents.pm_agent import run_full_analysis
+    from db.database import get_watchlist
 
     watchlist = await get_watchlist()  # 매번 DB에서 읽어 런타임 변경 즉시 반영
     now_kst = datetime.now(KST)

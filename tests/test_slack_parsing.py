@@ -3,7 +3,6 @@ import pytest
 
 from slack_bot import bot
 
-
 # ── 명령 라우팅 ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("text", ["도움", "도움말", "help", "사용법"])

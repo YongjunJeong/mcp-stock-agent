@@ -9,7 +9,7 @@ SQLite DB 레이어 (aiosqlite)
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -62,7 +62,7 @@ async def init_db() -> None:
         (count,) = await cursor.fetchone()
         if count == 0:
             env_val = os.getenv("WATCHLIST_KR", "005930,000660,035420")
-            now_utc = datetime.now(timezone.utc).isoformat()
+            now_utc = datetime.now(UTC).isoformat()
             tickers = [t.strip() for t in env_val.split(",") if t.strip()]
             await db.executemany(
                 "INSERT OR IGNORE INTO watchlist (ticker, added_at) VALUES (?, ?)",
@@ -92,7 +92,7 @@ async def add_ticker(ticker: str) -> bool:
         )
         if await cursor.fetchone():
             return False
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
         await db.execute(
             "INSERT INTO watchlist (ticker, added_at) VALUES (?, ?)",
             (ticker, now_utc),
@@ -115,7 +115,7 @@ async def save_analysis(result: dict) -> None:
     """분석 결과 저장. 예외는 절대 전파하지 않음 — 분석 흐름을 방해해선 안 됨."""
     try:
         scores = result.get("scores", {})
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
         async with aiosqlite.connect(_db_path()) as db:
             await db.execute(
                 """

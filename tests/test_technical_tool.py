@@ -7,7 +7,6 @@ import pytest
 
 from mcp_server.tools import technical as t
 
-
 # ── 신호 해석 ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("rsi,expected", [

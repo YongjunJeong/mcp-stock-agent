@@ -7,8 +7,8 @@ Technical Agent
 import logging
 
 from agents.gemini_client import call_gemini, extract_score
-from mcp_server.tools.technical import get_technical_indicators
 from mcp_server.tools.pattern import analyze_chart_pattern
+from mcp_server.tools.technical import get_technical_indicators
 
 logger = logging.getLogger("agents.technical")
 

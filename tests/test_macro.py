@@ -3,7 +3,6 @@ import pytest
 
 from mcp_server.tools import macro as m
 
-
 # ── 일별 변동폭 ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("n", [0, 1, 2, 5, 6, 10, 30])

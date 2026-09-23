@@ -18,7 +18,6 @@ import pytest
 
 from mcp_server import indicators as ind
 
-
 # ── 독립 참조 구현 ───────────────────────────────────────────────────
 
 def ref_rma(values, length):
@@ -38,8 +37,8 @@ def ref_rsi(closes, length=14):
     losses = [float("nan")] + [min(closes[i] - closes[i - 1], 0.0) for i in range(1, len(closes))]
     ag, al = ref_rma(gains, length), ref_rma(losses, length)
     return [
-        float("nan") if math.isnan(g) else min(100.0, max(0.0, 100 * g / (g + abs(l))))
-        for g, l in zip(ag, al)
+        float("nan") if math.isnan(g) else min(100.0, max(0.0, 100 * g / (g + abs(lo))))
+        for g, lo in zip(ag, al, strict=True)
     ]
 
 
@@ -74,7 +73,7 @@ def closes():
 def test_rsi_matches_independent_reference(closes):
     got = ind.rsi(pd.Series(closes), 14).tolist()
     exp = ref_rsi(closes, 14)
-    for i, (g, e) in enumerate(zip(got, exp)):
+    for i, (g, e) in enumerate(zip(got, exp, strict=True)):
         if math.isnan(e):
             assert math.isnan(g), f"index {i}: NaN이어야 함"
         else:
@@ -107,7 +106,7 @@ def test_macd_matches_independent_reference(closes):
     slow = ref_ema_presma(closes, 26)
     macd_line = [
         float("nan") if (math.isnan(f) or math.isnan(s)) else f - s
-        for f, s in zip(fast, slow)
+        for f, s in zip(fast, slow, strict=True)
     ]
     first_valid = next(i for i, v in enumerate(macd_line) if not math.isnan(v))
     sig_tail = ref_ema_presma(macd_line[first_valid:], 9)

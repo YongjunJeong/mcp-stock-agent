@@ -75,9 +75,11 @@ async def _scrape_naver_fundamental(ticker: str):
     url = f"https://finance.naver.com/item/coinfo.nhn?code={ticker}"
     timeout = aiohttp.ClientTimeout(total=10)
 
-    async with aiohttp.ClientSession(headers=_HEADERS, timeout=timeout) as session:
-        async with session.get(url) as resp:
-            html = await resp.text(encoding="euc-kr", errors="replace")
+    async with (
+        aiohttp.ClientSession(headers=_HEADERS, timeout=timeout) as session,
+        session.get(url) as resp,
+    ):
+        html = await resp.text(encoding="euc-kr", errors="replace")
 
     soup = BeautifulSoup(html, "html.parser")
 
