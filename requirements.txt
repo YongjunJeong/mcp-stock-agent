@@ -5,9 +5,10 @@ beautifulsoup4>=4.12.0
 yfinance>=0.2.40
 
 # ── 기술적 지표 ───────────────────────────────────────
-pandas>=2.2.3
-# pandas-ta는 Dockerfile에서 --no-deps로 별도 설치 (버전 충돌 방지)
-numpy>=1.26.0
+# RSI/MACD/볼린저는 mcp_server/indicators.py에서 pandas로 직접 계산합니다.
+# (pandas-ta는 0.4 계열부터 numba를 필수로 요구해 --no-deps 설치와 충돌)
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
 
 # ── AI / Gemini ───────────────────────────────────────
 google-genai>=1.0.0

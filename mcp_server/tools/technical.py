@@ -1,13 +1,15 @@
 """
 Tool 2: get_technical_indicators
-RSI, MACD, Bollinger Bands, Volume Ratio를 pykrx + pandas-ta로 계산합니다.
+RSI, MACD, Bollinger Bands, Volume Ratio를 pykrx 시세로 계산합니다.
+지표 계산은 mcp_server/indicators.py (pandas만 사용).
 """
 import logging
+import math
 from datetime import datetime, timedelta
 
-import pandas as pd
-import pandas_ta as ta
 from pykrx import stock as krx
+
+from mcp_server import indicators as ind
 
 logger = logging.getLogger("mcp.tools.technical")
 
@@ -48,28 +50,27 @@ async def get_technical_indicators(ticker: str, period: str = "6mo") -> dict:
         volume = df["volume"].astype(float)
 
         # ── RSI(14) ──────────────────────────────────────────
-        rsi_series = ta.rsi(close, length=14)
+        rsi_series = ind.rsi(close, length=14)
         rsi_val    = float(rsi_series.iloc[-1])
 
         # ── MACD(12, 26, 9) ───────────────────────────────────
-        macd_df   = ta.macd(close, fast=12, slow=26, signal=9)
-        macd_val  = float(macd_df["MACD_12_26_9"].iloc[-1])
-        macd_sig  = float(macd_df["MACDs_12_26_9"].iloc[-1])
-        macd_hist = float(macd_df["MACDh_12_26_9"].iloc[-1])
-        prev_hist = float(macd_df["MACDh_12_26_9"].iloc[-2])
+        macd_df   = ind.macd(close, fast=12, slow=26, signal=9)
+        macd_val  = float(macd_df["macd"].iloc[-1])
+        macd_sig  = float(macd_df["signal"].iloc[-1])
+        macd_hist = float(macd_df["histogram"].iloc[-1])
+        prev_hist = float(macd_df["histogram"].iloc[-2])
 
         # ── Bollinger Bands(20, 2σ) ───────────────────────────
-        bb_df = ta.bbands(close, length=20, std=2)
-        # pandas-ta 버전에 따라 컬럼명이 다를 수 있어 동적으로 탐색
-        bb_upper_col = next((c for c in bb_df.columns if c.startswith("BBU")), None)
-        bb_mid_col   = next((c for c in bb_df.columns if c.startswith("BBM")), None)
-        bb_lower_col = next((c for c in bb_df.columns if c.startswith("BBL")), None)
-        if not all([bb_upper_col, bb_mid_col, bb_lower_col]):
-            raise ValueError(f"BB 컬럼 탐색 실패: {bb_df.columns.tolist()}")
-        bb_upper = float(bb_df[bb_upper_col].iloc[-1])
-        bb_mid   = float(bb_df[bb_mid_col].iloc[-1])
-        bb_lower = float(bb_df[bb_lower_col].iloc[-1])
-        bb_pct   = (close.iloc[-1] - bb_lower) / (bb_upper - bb_lower)  # 0~1
+        bb_df    = ind.bbands(close, length=20, std=2.0)
+        bb_upper = float(bb_df["upper"].iloc[-1])
+        bb_mid   = float(bb_df["mid"].iloc[-1])
+        bb_lower = float(bb_df["lower"].iloc[-1])
+        bb_pct   = float(bb_df["pct_b"].iloc[-1])   # 0~1
+
+        # 가격이 완전 횡보하면 밴드 폭이 0이 되어 NaN이 나옵니다.
+        # 이 상태로 신호 해석에 넘기면 모든 비교가 False가 되므로 여기서 걸러냅니다.
+        if any(math.isnan(v) for v in (rsi_val, macd_hist, prev_hist, bb_pct)):
+            return {"error": f"지표 계산 결과에 NaN 포함: {ticker}"}
 
         # ── Volume Ratio (최근 거래량 / 20일 평균) ────────────
         vol_ma20    = volume.rolling(20).mean().iloc[-1]
@@ -106,10 +107,10 @@ async def get_technical_indicators(ticker: str, period: str = "6mo") -> dict:
             # Technical Agent가 참고할 요약 시계열 (최근 20봉)
             "history": {
                 "dates":  [d.strftime("%Y-%m-%d") for d in df.index[-20:]],
-                "close":  [int(v) for v in close[-20:]],
-                "rsi":    [round(float(v), 1) for v in rsi_series[-20:]],
+                "close":  [int(v) for v in close.iloc[-20:]],
+                "rsi":    [round(float(v), 1) for v in rsi_series.iloc[-20:]],
                 "macd_hist": [round(float(v), 1)
-                              for v in macd_df["MACDh_12_26_9"][-20:]],
+                              for v in macd_df["histogram"].iloc[-20:]],
             },
         }
 
