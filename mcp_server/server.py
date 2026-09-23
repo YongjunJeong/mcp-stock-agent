@@ -8,16 +8,28 @@ MCP Server — 6개 Tool을 MCP 프로토콜로 노출합니다.
 실행:
   python -m mcp_server.server
 """
+import contextlib
 import logging
+import sys
+from pathlib import Path
 
+from dotenv import load_dotenv
 from mcp.server.mcpserver import MCPServer
 
-from mcp_server.tools.price import get_price_data
-from mcp_server.tools.technical import get_technical_indicators
-from mcp_server.tools.pattern import analyze_chart_pattern
-from mcp_server.tools.fundamental import get_financial_statements
-from mcp_server.tools.sentiment import get_news_sentiment
-from mcp_server.tools.macro import get_macro_indicators
+# pykrx(>=1.2.5)는 import 시점에 KRX_ID/KRX_PW로 KRX에 로그인합니다.
+# 그래서 .env는 도구 모듈보다 먼저 읽어야 합니다.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+# 로그인 결과를 print로 stdout에 찍는데, stdio 모드에서 stdout은 JSON-RPC
+# 채널이라 이 한 줄 때문에 클라이언트가 첫 메시지부터 파싱에 실패합니다.
+# import 동안만 stderr로 돌립니다. (서빙 중의 출력은 mcp가 stderr로 보냅니다.)
+with contextlib.redirect_stdout(sys.stderr):
+    from mcp_server.tools.price import get_price_data
+    from mcp_server.tools.technical import get_technical_indicators
+    from mcp_server.tools.pattern import analyze_chart_pattern
+    from mcp_server.tools.fundamental import get_financial_statements
+    from mcp_server.tools.sentiment import get_news_sentiment
+    from mcp_server.tools.macro import get_macro_indicators
 
 logger = logging.getLogger("mcp.server")
 
