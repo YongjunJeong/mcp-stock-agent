@@ -6,17 +6,14 @@
 """
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).parent
-sys.path.insert(0, str(ROOT))
-load_dotenv(ROOT / ".env")
-
 from logging_config import setup_logging
 
+ROOT = Path(__file__).parent
+load_dotenv(ROOT / ".env")
 setup_logging()
 logger = logging.getLogger("main")
 
@@ -26,8 +23,8 @@ async def main():
     await init_db()
     logger.info("DB 초기화 완료")
 
-    from slack_bot.bot import start_bot
     from scheduler.cron import create_scheduler
+    from slack_bot.bot import start_bot
 
     # 스케줄러 시작
     scheduler = create_scheduler()

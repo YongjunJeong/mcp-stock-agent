@@ -24,12 +24,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # 채널이라 이 한 줄 때문에 클라이언트가 첫 메시지부터 파싱에 실패합니다.
 # import 동안만 stderr로 돌립니다. (서빙 중의 출력은 mcp가 stderr로 보냅니다.)
 with contextlib.redirect_stdout(sys.stderr):
-    from mcp_server.tools.price import get_price_data
-    from mcp_server.tools.technical import get_technical_indicators
-    from mcp_server.tools.pattern import analyze_chart_pattern
     from mcp_server.tools.fundamental import get_financial_statements
-    from mcp_server.tools.sentiment import get_news_sentiment
     from mcp_server.tools.macro import get_macro_indicators
+    from mcp_server.tools.pattern import analyze_chart_pattern
+    from mcp_server.tools.price import get_price_data
+    from mcp_server.tools.sentiment import get_news_sentiment
+    from mcp_server.tools.technical import get_technical_indicators
 
 logger = logging.getLogger("mcp.server")
 

@@ -16,10 +16,10 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
+from slack_bolt.async_app import AsyncApp
 
-from db.database import get_watchlist, add_ticker, remove_ticker, get_history
+from db.database import add_ticker, get_history, get_watchlist, remove_ticker
 
 logger = logging.getLogger("slack-bot")
 

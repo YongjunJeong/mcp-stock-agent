@@ -15,13 +15,13 @@ Final_Score = (Tech × 0.30) + (Fund × 0.35) + (Macro × 0.20) + (Sent × 0.15)
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from agents.gemini_client import call_gemini, PM_MAX_OUTPUT_TOKENS
-from agents.technical_agent import run_technical_agent
 from agents.fundamental_agent import run_fundamental_agent
+from agents.gemini_client import PM_MAX_OUTPUT_TOKENS, call_gemini
 from agents.macro_agent import run_macro_agent
 from agents.sentiment_agent import run_sentiment_agent
+from agents.technical_agent import run_technical_agent
 
 logger = logging.getLogger("agents.pm")
 
@@ -90,7 +90,7 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     )
     tech_result, fund_result, macro_result, sent_result = [
         _neutral_on_error(r, label)
-        for r, label in zip(_raw_results, ("기술적", "펀더멘털", "매크로", "감성"))
+        for r, label in zip(_raw_results, ("기술적", "펀더멘털", "매크로", "감성"), strict=True)
     ]
 
     tech_score  = tech_result["score"]
@@ -234,7 +234,7 @@ def _compute_delta(
     score_change = round(final_score - prev_score, 1)
 
     dt_prev = datetime.fromisoformat(prev["analyzed_at"])
-    diff    = datetime.now(timezone.utc) - dt_prev
+    diff    = datetime.now(UTC) - dt_prev
     if diff < timedelta(hours=1):
         analyzed_ago = f"{int(diff.total_seconds() / 60)}분 전"
     elif diff < timedelta(days=1):

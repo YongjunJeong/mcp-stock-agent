@@ -16,6 +16,7 @@ Tool 6: get_macro_indicators
 - S&P500 / NASDAQ / VIX: yfinance (Yahoo Finance, 무료/키 불필요)
 """
 import asyncio
+import contextlib
 import logging
 from datetime import datetime, timedelta
 
@@ -320,12 +321,10 @@ async def _fetch_foreign_flow(session: aiohttp.ClientSession) -> dict:
                 label = tds[0].get_text(strip=True)
                 value = tds[1].get_text(strip=True).replace(",", "").replace("억", "")
                 if "외국인" in label:
-                    try:
+                    with contextlib.suppress(ValueError):
                         result[label] = int(value)
-                    except ValueError:
-                        pass
 
-        net = result.get("외국인순매수", result.get("외국인", None))
+        net = result.get("외국인순매수", result.get("외국인"))
         if net is None:
             # 페이지 구조가 바뀌면 조용히 중립 처리되어 점수만 틀어지므로 로그를 남깁니다.
             logger.warning(
@@ -462,13 +461,21 @@ def _fetch_us_markets_sync() -> dict:
 def _us_index_signal(name: str, value: float, chg_pct: float) -> str:
     """VIX 공포 구간 및 미국 지수 방향 신호 텍스트"""
     if name == "vix":
-        if value >= 35: return f"⛔ 극도 공포 (VIX {value:.1f}) — 전면 리스크오프"
-        if value >= 30: return f"🚨 공포 구간 (VIX {value:.1f}) — 신흥국 자금 이탈"
-        if value >= 25: return f"⚠️ 변동성 상승 (VIX {value:.1f}) — 주의"
-        if value >= 20: return f"🟡 경계 구간 (VIX {value:.1f})"
-        return               f"✅ 안정 (VIX {value:.1f})"
+        if value >= 35:
+            return f"⛔ 극도 공포 (VIX {value:.1f}) — 전면 리스크오프"
+        if value >= 30:
+            return f"🚨 공포 구간 (VIX {value:.1f}) — 신흥국 자금 이탈"
+        if value >= 25:
+            return f"⚠️ 변동성 상승 (VIX {value:.1f}) — 주의"
+        if value >= 20:
+            return f"🟡 경계 구간 (VIX {value:.1f})"
+        return f"✅ 안정 (VIX {value:.1f})"
+
     # S&P500 / NASDAQ
-    if chg_pct >=  1.5: return f"강세 (+{chg_pct:.2f}%)"
-    if chg_pct >=  0.0: return f"소폭 상승 (+{chg_pct:.2f}%)"
-    if chg_pct >= -1.5: return f"소폭 하락 ({chg_pct:.2f}%)"
-    return                   f"약세 ({chg_pct:.2f}%)"
+    if chg_pct >= 1.5:
+        return f"강세 (+{chg_pct:.2f}%)"
+    if chg_pct >= 0.0:
+        return f"소폭 상승 (+{chg_pct:.2f}%)"
+    if chg_pct >= -1.5:
+        return f"소폭 하락 ({chg_pct:.2f}%)"
+    return f"약세 ({chg_pct:.2f}%)"

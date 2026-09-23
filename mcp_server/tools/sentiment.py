@@ -159,7 +159,6 @@ async def _fetch_naver_news(ticker: str, max_pages: int = 3) -> list[dict]:
 
 def _keyword_score(text: str) -> int:
     """키워드 매칭으로 +1(긍정) / -1(부정) / 0(중립) 반환"""
-    text_lower = text.lower()
     pos = sum(1 for kw in _POS_KEYWORDS if kw in text)
     neg = sum(1 for kw in _NEG_KEYWORDS if kw in text)
     if pos > neg:

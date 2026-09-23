@@ -507,20 +507,23 @@ mcp-stock-agent/
 ├── data/                           # 런타임 DB (gitignore, Docker named volume 사용)
 │   └── stock_agent.db              # 자동 생성 — 커밋하지 않음
 │
-├── tests/                          # pytest 스위트 (148개)
+├── tests/                          # pytest 스위트 (네트워크·API 키 불필요)
 │   ├── test_indicators.py          # 지표 수식 (독립 참조 구현과 대조)
 │   ├── test_slack_parsing.py       # 멘션·명령 파싱
 │   ├── test_scoring.py             # SCORE 추출 · 규칙 기반 폴백
 │   ├── test_macro.py               # 환율 구간 · 속도 경보 · 종합 신호
 │   ├── test_pm_agent.py            # 가중합 · Safety Brake · Delta
+│   ├── test_macro_agent.py         # 매크로 결과 캐시 (TTL · 동시 호출)
+│   ├── test_mcp_server.py          # tool 스키마 · stdio 채널 무결성
 │   ├── test_technical_tool.py      # 지표 파이프라인
 │   └── test_db.py                  # 워치리스트 CRUD · 히스토리
 │
-├── .github/workflows/ci.yml        # 테스트 · 임포트 · Docker 빌드 검증
+├── .github/workflows/ci.yml        # 린트 · 테스트 · 임포트 · Docker 빌드 검증
 ├── main.py                         # 진입점 (init_db → 스케줄러 → Slack Bot)
 ├── logging_config.py               # 엔트리포인트 공용 로깅 설정
 ├── requirements.txt
 ├── requirements-dev.txt
+├── pyproject.toml                  # ruff · pytest 설정
 ├── Dockerfile                      # 멀티스테이지 빌드 (builder + runtime)
 ├── docker-compose.yml              # named volume · 환경변수 주입 · 로그 순환
 ├── .env.example                    # 환경변수 템플릿
@@ -545,7 +548,7 @@ mcp-stock-agent/
 | 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드 — 의존성 최소화 및 계산 검증 용이 |
 | 패턴 감지 | numpy | 이중바닥, 역헤드앤숄더, 삼각수렴 (선형회귀 기반) |
 | 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드 |
-| 테스트 | pytest + pytest-asyncio | 순수 로직 148개 케이스, GitHub Actions에서 3.11/3.13 실행 |
+| 테스트 · 린트 | pytest + pytest-asyncio, ruff | 네트워크·API 키 없이 실행, GitHub Actions에서 3.11/3.13 |
 
 ---
 
@@ -638,6 +641,7 @@ python -m mcp_server.server   # stdio transport
 ```bash
 pip install -r requirements-dev.txt
 pytest -q
+ruff check .
 ```
 
 ---

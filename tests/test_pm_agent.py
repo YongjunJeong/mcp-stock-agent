@@ -1,10 +1,9 @@
 """PM Agent 종합 로직 — 가중합, Safety Brake, Delta, 예외 격리."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from agents import pm_agent as pm
-
 
 # ── 테스트용 에이전트 스텁 ───────────────────────────────────────────
 
@@ -143,7 +142,7 @@ def test_neutral_on_error_converts_exception():
 # ── Delta ────────────────────────────────────────────────────────────
 
 def _prev_row(score, signal, hours_ago=3):
-    ts = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    ts = datetime.now(UTC) - timedelta(hours=hours_ago)
     return {
         "analyzed_at": ts.isoformat(), "final_score": score, "signal_text": signal,
         "score_tech": 50, "score_fund": 50, "score_macro": 50, "score_sent": 50,

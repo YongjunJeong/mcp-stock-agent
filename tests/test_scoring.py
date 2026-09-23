@@ -1,12 +1,11 @@
 """점수 추출과 규칙 기반 폴백 점수."""
 import pytest
 
-from agents.gemini_client import extract_score, NEUTRAL_SCORE
 from agents import fundamental_agent as fa
-from agents import technical_agent as ta
 from agents import sentiment_agent as sa
+from agents import technical_agent as ta
+from agents.gemini_client import NEUTRAL_SCORE, extract_score
 from mcp_server.tools.fundamental import _valuation_signal
-
 
 # ── SCORE 추출 ───────────────────────────────────────────────────────
 

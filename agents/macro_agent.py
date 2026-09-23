@@ -180,6 +180,15 @@ async def _analyze() -> dict:
 
 # ── 프롬프트 빌더 ────────────────────────────────────────────────────
 
+_ALERT_LABELS = [
+    ("safety_brake", "⛔ Safety Brake 발동"),
+    ("panic_zone",   "🚨 Panic Zone(1450↑)"),
+    ("velocity",     "⚡ 3일 급등 경보"),
+    ("volatility",   "📊 일변동 10원↑"),
+    ("divergence",   "📐 MA5 과이격"),
+]
+
+
 def _build_prompt(macro: dict) -> str:
     usd    = macro.get("usd_krw", {})
     jpy    = macro.get("jpy_usd", {})
@@ -206,12 +215,7 @@ def _build_prompt(macro: dict) -> str:
     fx_trend_text = " → ".join(str(v) for v in fx_vals) if fx_vals else "N/A"
 
     # 경보 현황
-    alert_flags = []
-    if alerts.get("safety_brake"):  alert_flags.append("⛔ Safety Brake 발동")
-    if alerts.get("panic_zone"):    alert_flags.append("🚨 Panic Zone(1450↑)")
-    if alerts.get("velocity"):      alert_flags.append("⚡ 3일 급등 경보")
-    if alerts.get("volatility"):    alert_flags.append("📊 일변동 10원↑")
-    if alerts.get("divergence"):    alert_flags.append("📐 MA5 과이격")
+    alert_flags = [label for key, label in _ALERT_LABELS if alerts.get(key)]
     alert_text = " | ".join(alert_flags) if alert_flags else "없음"
 
     # KOSPI

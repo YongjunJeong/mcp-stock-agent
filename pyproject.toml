@@ -1,0 +1,17 @@
+# 패키징은 하지 않습니다. 개발 도구 설정만 모아둡니다.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# E4/E7/E9/F: 기본 규칙, B: 버그 가능성, I: import 정렬, UP: 문법 현대화, SIM: 단순화
+# RUF001~003(모호한 유니코드)은 한글 문자열의 전각 문자까지 잡아 잡음이 많아 제외합니다.
+select = ["E4", "E7", "E9", "F", "B", "I", "UP", "SIM"]
+# SIM108(if/else -> 삼항식)은 긴 식을 한 줄로 몰아 오히려 읽기 어려워지는 경우가 많습니다.
+ignore = ["SIM108"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
