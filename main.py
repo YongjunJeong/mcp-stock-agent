@@ -15,10 +15,9 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+from logging_config import setup_logging
+
+setup_logging()
 logger = logging.getLogger("main")
 
 

@@ -79,7 +79,7 @@ async def run_fundamental_agent(ticker: str) -> dict:
 def _build_prompt(ticker: str, fund: dict) -> str:
     val = fund.get("valuation", {})
     sig = fund.get("signals", {})
-    cap = fund.get("market_cap_billion_krw")
+    cap = fund.get("market_cap_eok_krw")
     cap_text = f"{cap:,.0f}억원" if cap else "N/A"
 
     per = val.get("per")

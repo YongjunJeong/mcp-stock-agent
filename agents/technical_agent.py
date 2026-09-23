@@ -4,7 +4,6 @@ Technical Agent
 사용 Tool: get_technical_indicators + analyze_chart_pattern
 출력: score(0-100) + report(str)
 """
-import json
 import logging
 
 from agents.gemini_client import call_gemini, extract_score
