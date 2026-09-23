@@ -17,7 +17,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from agents.gemini_client import call_gemini
+from agents.gemini_client import call_gemini, PM_MAX_OUTPUT_TOKENS
 from agents.technical_agent import run_technical_agent
 from agents.fundamental_agent import run_fundamental_agent
 from agents.macro_agent import run_macro_agent
@@ -157,7 +157,9 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
         sent_score, sent_result["report"],
         delta=delta,
     )
-    pm_response = await call_gemini(_SYSTEM, pm_prompt)
+    pm_response = await call_gemini(
+        _SYSTEM, pm_prompt, max_output_tokens=PM_MAX_OUTPUT_TOKENS
+    )
 
     if not pm_response:
         pm_response = _fallback_pm_report(

@@ -16,6 +16,12 @@ from google.genai import types as gtypes
 
 logger = logging.getLogger("agents.gemini")
 
+# 점수만 내는 전문가 에이전트의 기본 출력 예산.
+# PM 에이전트는 종합의견 + 근거 + 리스크 + STRATEGY 블록까지 써야 해서
+# 같은 예산을 쓰면 STRATEGY_END가 잘려 전략 섹션이 통째로 사라집니다.
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
+PM_MAX_OUTPUT_TOKENS = 2048
+
 _MAX_ATTEMPTS = 2
 _RETRY_BASE_DELAY = 1.0
 
@@ -36,13 +42,18 @@ def get_model() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
-async def call_gemini(system_prompt: str, user_prompt: str) -> str:
+async def call_gemini(
+    system_prompt: str,
+    user_prompt: str,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+) -> str:
     """
     Gemini에 system + user 프롬프트를 전달하고 텍스트 응답을 반환합니다.
 
     Args:
-        system_prompt: Agent 페르소나 및 출력 형식 지시
-        user_prompt:   분석할 데이터 및 질문
+        system_prompt:     Agent 페르소나 및 출력 형식 지시
+        user_prompt:       분석할 데이터 및 질문
+        max_output_tokens: 출력 토큰 상한
 
     Returns:
         str: Gemini 응답 텍스트 (빈 문자열이면 오류)
@@ -53,7 +64,7 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
     config = gtypes.GenerateContentConfig(
         system_instruction=system_prompt,
         temperature=0.3,
-        max_output_tokens=1024,
+        max_output_tokens=max_output_tokens,
         thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
     )
 
