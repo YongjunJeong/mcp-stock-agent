@@ -547,7 +547,7 @@ mcp-stock-agent/
 | 비동기 HTTP | aiohttp | asyncio.gather로 병렬 데이터 수집 |
 | 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드 — 의존성 최소화 및 계산 검증 용이 |
 | 패턴 감지 | numpy | 이중바닥, 역헤드앤숄더, 삼각수렴 (선형회귀 기반) |
-| 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드 |
+| 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드, 전 의존성 바이너리 휠(컴파일러 불필요) |
 | 테스트 · 린트 | pytest + pytest-asyncio, ruff | 네트워크·API 키 없이 실행, GitHub Actions에서 3.11/3.13 |
 
 ---

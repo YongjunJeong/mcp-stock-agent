@@ -3,14 +3,10 @@ FROM python:3.13-slim AS builder
 
 WORKDIR /app
 
-# C 확장 빌드에 필요한 시스템 패키지 (aiohttp, numpy 등)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
+# 모든 의존성이 x86_64·aarch64용 바이너리 휠을 제공하므로 컴파일러가 필요 없습니다.
+# --prefer-binary: 최신 버전이 소스 배포판만 있으면 휠이 있는 직전 버전을 고릅니다.
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir --prefer-binary --prefix=/install -r requirements.txt
 
 
 # ── 런타임 스테이지: 최소 이미지 ──────────────────────────────────────
