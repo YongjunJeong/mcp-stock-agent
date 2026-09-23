@@ -49,7 +49,8 @@ async def get_financial_statements(ticker: str) -> dict:
                 "bps":        bps,
                 "div_yield":  div_yield,
             },
-            "market_cap_billion_krw": (
+            # pykrx 시가총액(원) -> 억원
+            "market_cap_eok_krw": (
                 round(market_cap / 1e8, 1) if market_cap else None
             ),
             "signals": {

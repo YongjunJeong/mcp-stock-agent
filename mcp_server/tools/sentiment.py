@@ -4,7 +4,6 @@ Naver Finance에서 최근 뉴스를 스크래핑하고 사전 기반 감성 점
 최종 감성 해석은 Sentiment Agent(Gemini)가 뉴스 원문을 바탕으로 수행합니다.
 """
 import logging
-import re
 from datetime import datetime, timedelta
 
 import aiohttp

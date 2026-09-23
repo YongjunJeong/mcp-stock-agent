@@ -6,7 +6,6 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-import pandas as pd
 from pykrx import stock as krx
 
 logger = logging.getLogger("mcp.tools.price")

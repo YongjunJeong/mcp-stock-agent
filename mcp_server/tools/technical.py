@@ -46,8 +46,6 @@ async def get_technical_indicators(ticker: str, period: str = "6mo") -> dict:
             "종가": "close", "거래량": "volume",
         })
         close  = df["close"].astype(float)
-        high   = df["high"].astype(float)
-        low    = df["low"].astype(float)
         volume = df["volume"].astype(float)
 
         # ── RSI(14) ──────────────────────────────────────────

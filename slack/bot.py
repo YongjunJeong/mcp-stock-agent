@@ -75,11 +75,6 @@ COMPANY_MAP: dict[str, str] = {
     "하나금융지주":    "086790",
 }
 
-_SKIP_WORDS = {
-    "US", "KR", "IS", "IN", "AT", "TO", "AN", "AI",
-    "IT", "OR", "BE", "BY", "ON", "NO", "SO", "DO",
-    "GO", "UP", "OK", "HI", "BUY", "THE", "FOR", "AND",
-}
 
 
 # ── 마크다운 변환 ─────────────────────────────────────────────────────
@@ -327,7 +322,9 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
         latest      = price_data.get("latest", {})
         close_price = f"{latest.get('close', 'N/A'):,}" if isinstance(latest.get('close'), int) else "N/A"
         change_pct  = latest.get("change_pct", 0)
-        change_text = f"{change_pct:+.2f}%" if change_pct else "N/A"
+        change_text = (
+            f"{change_pct:+.2f}%" if isinstance(change_pct, (int, float)) else "N/A"
+        )
 
         emoji = _score_emoji(final)
 

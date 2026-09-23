@@ -1,5 +1,5 @@
 """
-스케줄러 — 장중(09:00~15:30 KST) 매 1시간 자동 분석
+스케줄러 — 장중(09:00~15:00 KST) 매 1시간 자동 분석
 Final_Score ≥ SIGNAL_THRESHOLD_STRONG → Slack 알림
 """
 import asyncio
@@ -138,7 +138,7 @@ async def _run_watchlist_scan() -> None:
 def create_scheduler() -> AsyncIOScheduler:
     """
     APScheduler 인스턴스를 생성하고 잡을 등록합니다.
-    장중 09:00~15:30 KST, 매 시간 정각 실행.
+    평일 09:00~15:00 KST, 매 시간 정각 실행 (09시부터 15시까지 총 7회).
     """
     scheduler = AsyncIOScheduler(timezone=KST)
 
