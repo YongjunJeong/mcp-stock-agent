@@ -53,7 +53,7 @@ async def analyze_chart_pattern(ticker: str, period: str = "6mo") -> dict:
             patterns.append(ihs)
 
         # ── 3. 박스권 돌파 (Breakout) ───────────────────────────
-        bo = _detect_breakout(close, high, volume)
+        bo = _detect_breakout(close, high, low, volume)
         if bo["detected"]:
             patterns.append(bo)
 
@@ -61,6 +61,9 @@ async def analyze_chart_pattern(ticker: str, period: str = "6mo") -> dict:
         tri = _detect_triangle(high, low, close)
         if tri["detected"]:
             patterns.append(tri)
+
+        # 신뢰도 높은 순으로 정렬 (strongest_pattern이 탐지 순서에 좌우되지 않도록)
+        patterns.sort(key=lambda p: p["confidence"], reverse=True)
 
         # 최근 60봉 OHLCV (LLM이 직접 참고)
         n = min(60, len(close))
@@ -176,14 +179,14 @@ def _detect_ihs(low: np.ndarray, close: np.ndarray) -> dict:
 
 
 def _detect_breakout(close: np.ndarray, high: np.ndarray,
-                     volume: np.ndarray) -> dict:
+                     low: np.ndarray, volume: np.ndarray) -> dict:
     """박스권 돌파: 최근 20봉 박스 상단을 거래량 증가와 함께 돌파"""
     base = {"name": "박스권 돌파", "detected": False}
     if len(close) < 25:
         return base
 
     box_high = max(high[-25:-5])   # 최근 박스권 상단 (최근 5봉 제외)
-    box_low  = min(close[-25:-5])  # 박스권 하단
+    box_low  = min(low[-25:-5])    # 박스권 하단 (상단과 같은 기준으로 저가 사용)
 
     # 박스권이 너무 넓으면(30% 초과) 박스 아님
     if (box_high - box_low) / box_low > 0.30:
@@ -232,10 +235,13 @@ def _detect_triangle(high: np.ndarray, low: np.ndarray,
     # 고가 추세↓, 저가 추세↑ = 수렴
     detected = slope_h < 0 and slope_l > 0
 
-    # 수렴도: 범위 축소 비율
-    range_start = seg_h[0] - seg_l[0]
-    range_end   = seg_h[-1] - seg_l[-1]
-    converge_pct = (range_start - range_end) / range_start if range_start > 0 else 0
+    # 수렴도: 범위 축소 비율.
+    # 양 끝 '단일 봉'의 폭을 비교하면 캔들 하나에 결과가 뒤집히므로
+    # 앞뒤 구간의 평균 폭으로 비교합니다.
+    w = max(3, len(seg_h) // 6)
+    range_start = float(np.mean(seg_h[:w] - seg_l[:w]))
+    range_end   = float(np.mean(seg_h[-w:] - seg_l[-w:]))
+    converge_pct = (range_start - range_end) / range_start if range_start > 0 else 0.0
 
     detected = detected and converge_pct > 0.20  # 20% 이상 수렴
 
