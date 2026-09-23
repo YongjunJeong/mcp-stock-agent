@@ -131,9 +131,7 @@ async def _fetch_usd_krw_advanced(session: aiohttp.ClientSession, days: int) -> 
     ma5_div   = (current - ma5) / ma5 * 100
 
     # 일일 최대 변동 (최근 5일)
-    daily_max_vol = max(
-        abs(values[i] - values[i-1]) for i in range(-5, 0) if len(values) >= 5
-    ) if len(values) >= 5 else 0.0
+    daily_max_vol = _daily_max_vol(values)
 
     # ── 비선형 위험 가중치 ───────────────────────────────────────
     risk_weight, risk_zone = _get_risk_weight(current)
@@ -173,6 +171,20 @@ async def _fetch_usd_krw_advanced(session: aiohttp.ClientSession, days: int) -> 
             "values": [round(v, 2) for v in values],
         },
     }
+
+
+def _daily_max_vol(values: list[float], window: int = 5) -> float:
+    """
+    최근 `window`일간의 일별 변동폭 중 최댓값.
+
+    변동폭 N개를 보려면 값이 N+1개 필요합니다.
+    데이터가 모자라면 있는 만큼만 보고, 아예 없으면 0.0을 돌려줍니다.
+    """
+    recent = values[-(window + 1):]
+    return max(
+        (abs(recent[i] - recent[i - 1]) for i in range(1, len(recent))),
+        default=0.0,
+    )
 
 
 def _get_risk_weight(rate: float) -> tuple[float, str]:
@@ -315,11 +327,20 @@ async def _fetch_foreign_flow(session: aiohttp.ClientSession) -> dict:
                         pass
 
         net = result.get("외국인순매수", result.get("외국인", None))
+        if net is None:
+            # 페이지 구조가 바뀌면 조용히 중립 처리되어 점수만 틀어지므로 로그를 남깁니다.
+            logger.warning(
+                "외국인 수급 파싱 실패 — 페이지 구조 변경 가능성 "
+                f"(파싱된 라벨: {list(result.keys()) or '없음'})"
+            )
+
         signal = ("외국인순매수" if (net and net > 0)
                   else "외국인순매도" if (net and net < 0)
                   else "데이터없음")
         return {
-            "net_buy_billion": round(net / 1e8, 1) if isinstance(net, (int, float)) else None,
+            # 스크래핑 값이 이미 억원 단위입니다("억"을 떼어낸 숫자).
+            # 이전에는 여기서 1e8로 한 번 더 나눠 항상 0.0이 나왔습니다.
+            "net_buy_eok_krw": float(net) if isinstance(net, (int, float)) else None,
             "signal":          signal,
         }
     except Exception as e:
