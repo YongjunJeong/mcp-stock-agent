@@ -3,6 +3,7 @@ Tool 2: get_technical_indicators
 RSI, MACD, Bollinger Bands, Volume Ratio를 pykrx 시세로 계산합니다.
 지표 계산은 mcp_server/indicators.py (pandas만 사용).
 """
+import asyncio
 import logging
 import math
 from datetime import datetime, timedelta
@@ -35,7 +36,7 @@ async def get_technical_indicators(ticker: str, period: str = "6mo") -> dict:
     start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
     try:
-        df = krx.get_market_ohlcv_by_date(start, end, ticker)
+        df = await asyncio.to_thread(krx.get_market_ohlcv_by_date, start, end, ticker)
         if df.empty or len(df) < _MIN_BARS:
             return {"error": f"데이터 부족: {ticker} ({len(df)}봉)"}
 

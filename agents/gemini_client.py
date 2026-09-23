@@ -1,21 +1,23 @@
 """
 Gemini API 공통 클라이언트.
 모든 Agent가 이 모듈을 통해 Gemini를 호출합니다.
+- client.aio 사용 (동기 호출은 이벤트 루프를 막아 Slack 소켓까지 멈춤)
 - thinking_budget=0 (thinking 토큰이 output 예산을 잠식하는 문제 방지)
 - temperature=0.3 (일관된 분석 결과)
-- 자동 재시도 1회
+- 자동 재시도 1회 (지수 백오프)
 """
+import asyncio
 import logging
 import os
 import re
 
-from dotenv import load_dotenv
 from google import genai
 from google.genai import types as gtypes
 
-load_dotenv()
-
 logger = logging.getLogger("agents.gemini")
+
+_MAX_ATTEMPTS = 2
+_RETRY_BASE_DELAY = 1.0
 
 _client: genai.Client | None = None
 
@@ -46,7 +48,7 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
         str: Gemini 응답 텍스트 (빈 문자열이면 오류)
     """
     client = _get_client()
-    model  = get_model()
+    model = get_model()
 
     config = gtypes.GenerateContentConfig(
         system_instruction=system_prompt,
@@ -55,22 +57,22 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
         thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
     )
 
-    for attempt in range(2):
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            response = client.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=model,
                 contents=user_prompt,
                 config=config,
             )
-            text = response.text or ""
-            if not text:
-                logger.warning(f"Gemini 빈 응답 (attempt {attempt+1})")
-                continue
-            return text.strip()
+            text = (response.text or "").strip()
+            if text:
+                return text
+            logger.warning(f"Gemini 빈 응답 (attempt {attempt}/{_MAX_ATTEMPTS})")
         except Exception as e:
-            logger.error(f"Gemini 호출 실패 (attempt {attempt+1}): {e}")
-            if attempt == 1:
-                return ""
+            logger.error(f"Gemini 호출 실패 (attempt {attempt}/{_MAX_ATTEMPTS}): {e}")
+
+        if attempt < _MAX_ATTEMPTS:
+            await asyncio.sleep(_RETRY_BASE_DELAY * attempt)
 
     return ""
 

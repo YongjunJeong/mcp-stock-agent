@@ -2,6 +2,7 @@
 Tool 1: get_price_data
 한국 주식 OHLCV 데이터를 pykrx로 조회합니다.
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -28,13 +29,13 @@ async def get_price_data(ticker: str, period: str = "6mo") -> dict:
     start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
     try:
-        df = krx.get_market_ohlcv_by_date(start, end, ticker)
+        df = await asyncio.to_thread(krx.get_market_ohlcv_by_date, start, end, ticker)
         if df.empty:
             return {"error": f"데이터 없음: {ticker}"}
 
         # 종목명 조회
         try:
-            name = krx.get_market_ticker_name(ticker)
+            name = await asyncio.to_thread(krx.get_market_ticker_name, ticker)
         except Exception:
             name = ticker
 

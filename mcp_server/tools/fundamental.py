@@ -3,8 +3,8 @@ Tool 4: get_financial_statements
 Naver Finance coinfo 페이지에서 PER, PBR, EPS, 배당수익률을 스크래핑합니다.
 pykrx로 시가총액 데이터를 보완합니다.
 """
+import asyncio
 import logging
-import re
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -35,8 +35,8 @@ async def get_financial_statements(ticker: str) -> dict:
     try:
         per, eps, pbr, bps, div_yield = await _scrape_naver_fundamental(ticker)
 
-        # 시가총액 (pykrx)
-        market_cap = _get_market_cap(ticker)
+        # 시가총액 (pykrx — 동기 라이브러리라 스레드로 분리)
+        market_cap = await asyncio.to_thread(_get_market_cap, ticker)
 
         valuation_signal = _valuation_signal(per, pbr)
 
