@@ -460,13 +460,24 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
                 },
             ]
 
-        # Safety Brake / 매수 신호 강조 섹션 추가
+        # Safety Brake / 매크로 미확인 / 매수 신호 강조 섹션 추가
         if result.get("safety_brake"):
             blocks.insert(3, {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
                     "text": "⛔ *Safety Brake 발동* — USD/KRW 1,450원↑ + 급등 동시 감지. 매수 차단.",
+                },
+            })
+        elif not result.get("macro_available", True):
+            blocks.insert(3, {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "⚠️ *매크로 지표 확인 불가* — 환율 안전장치를 검증하지 "
+                        "못해 매수 신호를 보류했습니다."
+                    ),
                 },
             })
         elif result["buy_signal"]:

@@ -108,14 +108,27 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     )
 
     # ── Safety Brake: 1,450원 이상 + 3일 급등 시 매수 강제 차단 ───
+    # 매크로 조회가 실패하면 alerts 자체가 없습니다. 이때 예전 코드는
+    # .get("alerts", {}) 가 빈 dict를 돌려주며 조용히 브레이크를 풀어
+    # 안전장치를 확인하지 못한 채로 매수 신호를 내보낼 수 있었습니다.
+    # 확인 불가 = 차단(fail-safe)으로 처리합니다.
     safety_brake = False
-    usd_data = macro_result.get("raw_data", {}).get("usd_krw", {})
-    if usd_data.get("alerts", {}).get("safety_brake", False):
+    usd_data = (macro_result.get("raw_data") or {}).get("usd_krw") or {}
+    alerts = usd_data.get("alerts")
+    macro_available = alerts is not None
+
+    if not macro_available:
+        buy_signal  = False
+        signal_text = "⚠️ 매수 보류 (매크로 지표 확인 불가)"
+        logger.warning(
+            f"[PM Agent] {ticker} — 매크로 지표를 가져오지 못해 매수 신호를 보류합니다."
+        )
+    elif alerts.get("safety_brake", False):
         safety_brake = True
         final_score  = min(final_score, 35.0)   # 점수 강제 상한 35
         buy_signal   = False
         signal_text  = "⛔ 매수 차단 (Safety Brake 발동)"
-    elif usd_data.get("alerts", {}).get("panic_zone", False):
+    elif alerts.get("panic_zone", False):
         # Panic Zone만 (급등은 아님): 점수 상한 49
         final_score  = min(final_score, 49.0)
         buy_signal   = False
@@ -158,6 +171,7 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
         "buy_signal":    buy_signal,
         "signal_text":   signal_text,
         "safety_brake":  safety_brake,
+        "macro_available": macro_available,
         "delta":         delta,
         "scores": {
             "tech":  tech_score,
