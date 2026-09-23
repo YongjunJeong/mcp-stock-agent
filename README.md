@@ -1,9 +1,10 @@
-# MCP Stock Agent — 멀티에이전트 AI 주식 분석 시스템
+# MCP Stock Agent
 
-> **5개의 전문가 AI 에이전트가 한국 주식을 분석하고, 매수 신호를 Slack으로 전송하는 자동화 시스템입니다.**
->
-> MCP(Model Context Protocol) 기반 Tool 레이어, Gemini 2.5 Flash LLM, Slack Socket Mode,
-> SQLite 분석 히스토리 DB, 런타임 워치리스트 관리까지 갖춘 포트폴리오 프로젝트입니다.
+한국 주식을 4개 관점(기술적, 펀더멘털, 매크로, 뉴스 감성)에서 각각 분석하고,
+PM 에이전트가 이를 종합해 Slack으로 알려주는 멀티에이전트 시스템입니다.
+
+데이터 수집은 MCP(Model Context Protocol) Tool로 분리했고, 분석과 종합은 Gemini 2.5 Flash가 맡습니다.
+워치리스트와 분석 기록은 SQLite에 저장하고, Slack 명령으로 워치리스트를 바꿀 수 있습니다.
 
 ---
 
@@ -14,7 +15,7 @@
 ```
 사용자: @봇 삼성전자
 
-봇:     🔍 `005930` 분석 중... (5개 전문가 Agent 실행)
+봇:     🔍 `005930` 분석 중... (4개 전문가 Agent 실행)
 
         ⚠️ 삼성전자 (005930) 멀티에이전트 분석
         ─────────────────────────────────────
@@ -168,25 +169,25 @@
 ### 가중치 설계 근거
 
 ```
-Fundamental 35%  — 기업 내재가치가 장기 수익의 핵심
-Technical   30%  — 매수 타이밍과 단기 모멘텀
-Macro       20%  — 환율·외국인 수급이 한국 증시 방향의 핵심 변수
-Sentiment   15%  — 노이즈가 많아 의도적으로 낮은 비중
+Fundamental 35%  : 기업 내재가치가 장기 수익을 좌우한다고 봄
+Technical   30%  : 매수 타이밍과 단기 모멘텀
+Macro       20%  : 환율과 외국인 수급이 한국 증시 방향에 큰 영향
+Sentiment   15%  : 뉴스 노이즈가 많아 비중을 낮춤
 ```
 
 ### 매수 신호 임계값
 
 ```
 Final Score ≥ 70  →  🚨 매수 신호 (Slack 알림 발송)
-Final Score 55–69 →  ⚠️ 관망 (진입 조건 시나리오 제공)
+Final Score 55~69 →  ⚠️ 관망 (진입 조건 시나리오 제공)
 Final Score < 55  →  ⚪ 관망/회피
 ```
 
 ---
 
-## Memory Layer — 시계열 분석 추적
+## Memory Layer: 이전 분석과 비교
 
-매 분석 결과를 SQLite에 저장하고, **다음 분석 시 이전 결과와 비교해 변화 맥락을 AI에 제공**합니다.
+분석 결과를 매번 SQLite에 저장하고, 다음 분석 때 직전 결과와의 차이를 PM 에이전트 프롬프트에 넣습니다.
 
 ### 동작 흐름
 
@@ -319,10 +320,10 @@ volumes:
 
 ### 런타임 반영 방식
 
-APScheduler는 매 스캔 실행 시마다 DB에서 워치리스트를 새로 조회합니다. 따라서 **Slack으로 종목을 추가·제거하면 다음 정각 스캔에 즉시 반영**되며 앱 재시작이 필요 없습니다.
+APScheduler는 스캔할 때마다 DB에서 워치리스트를 새로 읽습니다. 그래서 Slack으로 종목을 추가하거나 빼면 다음 정각 스캔부터 반영되고, 앱을 다시 띄울 필요가 없습니다.
 
 ```python
-# scheduler/cron.py — 모듈 레벨 상수 대신 매번 DB 조회
+# scheduler/cron.py: 모듈 레벨 상수 대신 매번 DB 조회
 async def _run_watchlist_scan() -> None:
     watchlist = await get_watchlist()   # 실시간 반영
     for ticker in watchlist:
@@ -332,7 +333,7 @@ async def _run_watchlist_scan() -> None:
 
 ---
 
-## 핵심 설계 결정
+## 설계 결정
 
 ### 1. MCP(Model Context Protocol)를 Tool 레이어로
 
@@ -346,7 +347,7 @@ async def _run_watchlist_scan() -> None:
 
 ### 2. 환율 속도(Velocity) 우선 분석
 
-단순히 "1,400원 이상 = 위험"이 아닌, **속도와 레벨을 결합한 비선형 리스크 모델**을 적용했습니다.
+"1,400원 이상이면 위험" 같은 단일 기준 대신, 환율 수준과 변화 속도를 함께 봅니다. 구간이 올라갈수록 위험 가중치를 비선형으로 키웠습니다.
 
 ```
 [환율 위험 구간]
@@ -354,32 +355,34 @@ async def _run_watchlist_scan() -> None:
 1,400 ~ 1,449원  →  Stress Zone      (위험 가중치 ×2.5)
 1,450원 이상     →  Panic Zone       (위험 가중치 ×5.0)
 
-[속도 경보 — Velocity Alert]
+[속도 경보 (Velocity Alert)]
 3일 ROC > 1%                 →  패닉 셀링 전조 경보
 5일 MA 대비 3% 이상 이격     →  단기 급등 경보
 
-[Safety Brake — 매수 강제 차단]
+[Safety Brake: 매수 강제 차단]
 USD/KRW ≥ 1,450 AND 3일 ROC > 1%
 → buy_signal = False 강제
 → Final Score 상한 35점
 ```
 
-**원화 단독 약세 판별**: USD/KRW 상승 + JPY/USD 하락(엔화 강세)이 동시 발생하면
-글로벌 달러 강세가 아닌 **한국 고유 내부 리스크**로 판단합니다.
+원화 단독 약세도 따로 봅니다. USD/KRW가 오르는데 엔화는 강세라면
+글로벌 달러 강세가 아니라 한국 내부 요인일 가능성이 크다고 판단합니다.
 
 ### 3. 매크로 vs 감성 도메인 분리
 
-흔한 실수: 뉴스 감성 분석에 환율·연준 뉴스를 포함하면 매크로 신호가 이중으로 집계됩니다.
+뉴스 감성 분석에 환율이나 연준 뉴스까지 넣으면 매크로 신호가 두 번 반영됩니다.
+그래서 감성 에이전트 프롬프트에서 매크로 이슈를 명시적으로 제외했습니다.
 
-```python
-# Sentiment Agent 시스템 프롬프트
-"환율, 금리, 글로벌 증시, 지정학적 리스크 등 매크로 이슈는
- 분석하지 마세요. 기업 고유의 사건·제품·실적에만 집중하세요."
+```
+# Sentiment Agent 시스템 프롬프트 (agents/sentiment_agent.py)
+- 환율, 금리, 글로벌 증시, 지정학적 리스크 등 매크로 이슈는 분석하지 마세요.
+  (해당 내용은 별도 매크로 에이전트가 담당합니다)
+- 오직 해당 종목·기업에 직접 관련된 뉴스만 평가합니다.
 ```
 
 ### 4. 구조화된 LLM 출력 파싱
 
-PM Agent는 자유형식 리포트 끝에 **파싱 가능한 전략 블록**을 출력합니다.
+PM Agent는 자유 형식 리포트 끝에 정해진 형식의 전략 블록을 붙입니다. Slack 카드는 이 블록을 파싱해 표로 보여줍니다.
 
 ```
 STRATEGY_START
@@ -391,14 +394,14 @@ STRATEGY_START
 STRATEGY_END
 ```
 
-JSON보다 Regex 파싱을 선택한 이유: LLM이 토큰 압박 상황에서 JSON 문법 오류를 만드는 경우가 잦기 때문입니다.
+JSON 대신 마커와 `키: 값` 줄 형식을 쓴 건, 출력이 길어지면 LLM이 JSON 문법을 깨뜨리는 경우가 있어서입니다.
 
 ### 5. VIX 공포 지수 연동
 
 ```
 VIX < 20   →  ✅ 안정 (위험선호 정상, 신흥국 자금 유입 우호)
-VIX 20–25  →  🟡 경계 (변동성 확대 초기)
-VIX 25–30  →  ⚠️ 주의 (기관 헤지 증가)
+VIX 20~25  →  🟡 경계 (변동성 확대 초기)
+VIX 25~30  →  ⚠️ 주의 (기관 헤지 증가)
 VIX ≥ 30   →  🚨 공포 (글로벌 리스크오프)
 VIX ≥ 35   →  ⛔ 극도 공포 (Safety Brake 복합 → 최고경보)
 ```
@@ -412,14 +415,14 @@ Gemini 2.5 Flash는 기본적으로 출력 전 "thinking 토큰"을 소비합니
 response = await client.aio.models.generate_content(
     model="gemini-2.5-flash",
     config=GenerateContentConfig(
-        thinking_config=ThinkingConfig(thinking_budget=0),  # 핵심
+        thinking_config=ThinkingConfig(thinking_budget=0),  # thinking 끄기
         temperature=0.3,
         max_output_tokens=max_output_tokens,   # 전문가 1024 / PM 2048
     ),
 )
 ```
 
-### 7. save_analysis의 절대 예외 방지
+### 7. 히스토리 저장 실패를 분석과 분리
 
 ```python
 async def save_analysis(result: dict) -> None:
@@ -427,18 +430,18 @@ async def save_analysis(result: dict) -> None:
         ...  # DB 저장
     except Exception as e:
         logger.warning(f"히스토리 저장 실패 (무시됨): {e}")
-        # 절대 예외 전파 안 함 — DB 오류가 분석 응답을 막아선 안 됨
+        # 예외를 밖으로 내보내지 않음. DB 오류로 분석 응답이 막히면 안 됨
 ```
 
-DB 레이어 장애가 메인 분석 파이프라인에 영향을 주지 않도록 격리합니다.
+DB에 문제가 생겨도 분석 결과는 정상적으로 Slack에 전달됩니다.
 
 ### 8. 보조지표를 직접 계산
 
 RSI·MACD·볼린저밴드는 `mcp_server/indicators.py`에서 pandas로 직접 계산합니다.
 원래 `pandas-ta`를 썼지만 세 가지 이유로 걷어냈습니다.
 
-- 0.4 계열부터 `numba`를 import 시점에 필수로 요구해, 빌드 시간을 줄이려던
-  `--no-deps` 설치와 정면으로 충돌합니다 (컨테이너가 뜨긴 하는데 분석 요청마다 실패).
+- 0.4 계열부터 import 시점에 `numba`가 필요해서, 기존 Dockerfile의 `--no-deps`
+  설치로는 동작하지 않았습니다. 컨테이너는 뜨지만 분석 요청마다 실패하는 상태였습니다.
 - ARM(aarch64) 휠 문제로 빌드가 반복적으로 깨졌습니다.
 - 실제로 쓰는 함수는 3개뿐입니다.
 
@@ -455,7 +458,7 @@ RSI·MACD·볼린저밴드는 `mcp_server/indicators.py`에서 pandas로 직접 
 - Gemini: `client.models` → `client.aio.models`
 - pykrx(동기 라이브러리): `asyncio.to_thread`로 분리
 - 4개 전문가 에이전트: 서로 독립이므로 `asyncio.gather`로 병렬 실행
-  (`return_exceptions=True` — 하나가 죽어도 나머지로 분석을 이어감)
+  (`return_exceptions=True`로 하나가 실패해도 나머지로 분석을 이어감)
 
 ### 10. 매크로 분석 결과 공유
 
@@ -505,7 +508,7 @@ mcp-stock-agent/
 │   └── cron.py                     # APScheduler · 워치리스트 DB 조회 · 매수 신호 알림
 │
 ├── data/                           # 런타임 DB (gitignore, Docker named volume 사용)
-│   └── stock_agent.db              # 자동 생성 — 커밋하지 않음
+│   └── stock_agent.db              # 자동 생성, 커밋하지 않음
 │
 ├── tests/                          # pytest 스위트 (네트워크·API 키 불필요)
 │   ├── test_indicators.py          # 지표 수식 (독립 참조 구현과 대조)
@@ -545,7 +548,7 @@ mcp-stock-agent/
 | 미국 시장 | yfinance | S&P500·NASDAQ·VIX 무료 수집 |
 | 한국 시장 | pykrx + Naver Finance | OHLCV + 재무지표 (pykrx 재무 API 불안정 → Naver 스크래핑으로 대체) |
 | 비동기 HTTP | aiohttp | asyncio.gather로 병렬 데이터 수집 |
-| 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드 — 의존성 최소화 및 계산 검증 용이 |
+| 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드. 의존성을 줄이고 계산을 직접 검증하기 위해 |
 | 패턴 감지 | numpy | 이중바닥, 역헤드앤숄더, 삼각수렴 (선형회귀 기반) |
 | 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드, 전 의존성 바이너리 휠(컴파일러 불필요) |
 | 테스트 · 린트 | pytest + pytest-asyncio, ruff | 네트워크·API 키 없이 실행, GitHub Actions에서 3.11/3.13 |
@@ -554,20 +557,22 @@ mcp-stock-agent/
 
 ## 데이터 소스 및 한계
 
-| 데이터 | 소스 | 무료 | 한계 |
-|-------|------|------|------|
-| 한국 주식 OHLCV | pykrx (KRX) | ✅ | T+1 딜레이, KRX 데이터 포털 회원 로그인 필요 |
-| 한국 재무 지표 | Naver Finance (스크래핑) | ✅ | pykrx 재무 API 서버 장애로 대체 |
-| 뉴스 감성 | Naver 모바일 JSON API | ✅ | 한국어 뉴스만 |
-| USD/KRW, JPY/USD | Frankfurter (ECB) | ✅ | ECB 공시 기준, 하루 딜레이 |
-| S&P500, NASDAQ, VIX | yfinance (Yahoo Finance) | ✅ | 비공식 API, 간헐적 제한 가능 |
-| KOSPI, KOSDAQ | Naver 모바일 API | ✅ | 실시간 (15분 지연) |
-| 외국인 수급 | Naver Finance (스크래핑) | ✅ | 일별 집계만 제공 |
+모든 소스는 무료입니다. KRX만 회원 가입이 필요합니다.
+
+| 데이터 | 소스 | 한계 |
+|-------|------|------|
+| 한국 주식 OHLCV | pykrx (KRX) | T+1 딜레이, KRX 데이터 포털 회원 로그인 필요 |
+| 한국 재무 지표 | Naver Finance (스크래핑) | pykrx 재무 API 서버 장애로 대체 |
+| 뉴스 감성 | Naver 모바일 JSON API | 한국어 뉴스만 |
+| USD/KRW, JPY/USD | Frankfurter (ECB) | ECB 공시 기준, 하루 딜레이 |
+| S&P500, NASDAQ, VIX | yfinance (Yahoo Finance) | 비공식 API, 간헐적 제한 가능 |
+| KOSPI, KOSDAQ | Naver 모바일 API | 15분 지연 |
+| 외국인 수급 | Naver Finance (스크래핑) | 일별 집계. 페이지 구조가 바뀌면 파싱 실패(로그 경고) |
 
 ### 점수에 대해
 
 Final Score는 4개 에이전트가 LLM으로 매긴 점수의 고정 가중합입니다.
-가중치와 임계값(70)은 위에 적은 근거로 정한 값이며 **백테스트로 검증한 수치가 아닙니다.**
+가중치와 임계값(70)은 위에 적은 근거로 정한 값이고, 백테스트로 검증한 수치가 아닙니다.
 PM 리포트의 진입가·목표가·손절기준도 LLM 생성물이고 변동성 모델이나 포지션 사이징에
 기반하지 않습니다. 이 프로젝트는 멀티에이전트 오케스트레이션 구현 예제이지
 투자 판단 도구가 아닙니다.
@@ -594,12 +599,12 @@ WATCHLIST_KR=005930,000660,035420   # 첫 실행 시 DB 시드로 사용
 SIGNAL_THRESHOLD_STRONG=70
 ```
 
-> **KRX 계정이 필요합니다.** pykrx는 1.2.5부터 KRX 데이터 포털(https://data.krx.co.kr)
+> KRX 계정이 필요합니다. pykrx는 1.2.5부터 KRX 데이터 포털(https://data.krx.co.kr)
 > 회원 로그인을 지원하고, 1.2.9 문서는 `KRX_ID`/`KRX_PW`를 필수로 명시합니다.
 > 계정 없이 시세 조회가 실패하면 기술적 에이전트는 중립 점수(50)로 처리되고
 > Slack 카드의 현재가는 N/A로 표시됩니다.
 
-### 방법 1 — Docker (권장)
+### 방법 1: Docker (권장)
 
 ```bash
 git clone https://github.com/YongjunJeong/mcp-stock-agent.git
@@ -612,7 +617,7 @@ docker compose down            # 종료 (DB 데이터 보존)
 docker compose down --volumes  # 종료 + DB 완전 삭제
 ```
 
-### 방법 2 — Python 직접 실행 (로컬 개발용)
+### 방법 2: Python 직접 실행 (로컬 개발용)
 
 ```bash
 git clone https://github.com/YongjunJeong/mcp-stock-agent.git
@@ -626,7 +631,7 @@ python main.py
 # → Slack Bot (Socket Mode) + APScheduler 동시 시작
 ```
 
-### 방법 3 — MCP 서버만 단독 실행
+### 방법 3: MCP 서버만 단독 실행
 
 Tool 레이어만 MCP 클라이언트(Claude Desktop 등)에 붙일 때 사용합니다.
 
@@ -649,7 +654,7 @@ ruff check .
 ## 점수 계산 예시
 
 ```
-삼성전자 (005930) — 2026-03-01 기준
+삼성전자 (005930), 2026-03-01 기준
 
 기술적 분석:    75/100 × 0.30 = 22.5점   (MACD 상승, 박스권 돌파 시도)
 펀더멘털:       15/100 × 0.35 =  5.3점   (PER 15배↑, 배당수익률 낮음)
