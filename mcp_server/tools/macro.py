@@ -15,8 +15,8 @@ Tool 6: get_macro_indicators
 - 외국인 수급: Naver Finance 스크래핑
 - S&P500 / NASDAQ / VIX: yfinance (Yahoo Finance, 무료/키 불필요)
 """
+import asyncio
 import logging
-import re
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -59,7 +59,6 @@ async def get_macro_indicators(days: int = 30) -> dict:
         dict: 환율 분석, 지수, 외국인 수급, 비선형 리스크 신호
     """
     try:
-        import asyncio
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=_HEADERS, timeout=timeout) as session:
             usd_task     = _fetch_usd_krw_advanced(session, days)
@@ -413,9 +412,7 @@ async def _fetch_us_markets() -> dict:
     S&P500, NASDAQ, VIX를 yfinance로 수집합니다.
     동기 함수(_fetch_us_markets_sync)를 thread executor에서 실행합니다.
     """
-    import asyncio
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _fetch_us_markets_sync)
+    return await asyncio.to_thread(_fetch_us_markets_sync)
 
 
 def _fetch_us_markets_sync() -> dict:

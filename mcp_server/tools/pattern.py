@@ -3,6 +3,7 @@ Tool 3: analyze_chart_pattern
 Double Bottom, IH&S, 박스권 돌파, 삼각수렴 패턴을 근사 알고리즘으로 탐지합니다.
 최종 해석은 Technical Agent(LLM)가 수행합니다.
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -29,7 +30,7 @@ async def analyze_chart_pattern(ticker: str, period: str = "6mo") -> dict:
     start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
     try:
-        df = krx.get_market_ohlcv_by_date(start, end, ticker)
+        df = await asyncio.to_thread(krx.get_market_ohlcv_by_date, start, end, ticker)
         if df.empty or len(df) < 40:
             return {"error": f"데이터 부족: {ticker} ({len(df)}봉)"}
 
