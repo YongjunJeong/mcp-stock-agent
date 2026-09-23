@@ -1,5 +1,5 @@
 """
-스케줄러 — 장중(09:00~15:00 KST) 매 1시간 자동 분석
+스케줄러: 장중(09:00~15:00 KST) 매시 정각 자동 분석
 Final_Score ≥ SIGNAL_THRESHOLD_STRONG → Slack 알림
 """
 import asyncio
@@ -29,7 +29,7 @@ async def _notify_slack(result: dict) -> None:
     token      = os.getenv("SLACK_BOT_TOKEN")
     channel_id = os.getenv("SLACK_CHANNEL_ID")
     if not token or not channel_id:
-        logger.warning("Slack 토큰 또는 채널 ID 없음 — 알림 스킵")
+        logger.warning("Slack 토큰 또는 채널 ID가 없어 알림을 건너뜁니다")
         return
 
     ticker  = result["ticker"]
@@ -102,7 +102,7 @@ async def _notify_slack(result: dict) -> None:
 
 
 async def _run_watchlist_scan() -> None:
-    """워치리스트 전 종목 스캔 — 매수 신호 종목 알림."""
+    """워치리스트 전 종목을 분석하고 매수 신호가 나온 종목을 알립니다."""
     from agents.pm_agent import run_full_analysis
     from db.database import get_watchlist
 

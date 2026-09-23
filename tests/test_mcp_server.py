@@ -1,4 +1,4 @@
-"""MCP 서버 — tool 등록과 stdio 프로토콜 채널 무결성."""
+"""MCP 서버: tool 등록과 stdio 프로토콜 채널 무결성."""
 import asyncio
 import json
 import os

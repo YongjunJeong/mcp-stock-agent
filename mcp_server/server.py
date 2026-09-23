@@ -1,5 +1,5 @@
 """
-MCP Server — 6개 Tool을 MCP 프로토콜로 노출합니다.
+MCP Server. 6개 Tool을 MCP 프로토콜로 노출합니다.
 
 입력 스키마는 각 Tool 함수의 타입 힌트에서 자동 생성됩니다.
 (mcp 1.x의 `@server.list_tools()` / `@server.call_tool()` 데코레이터와
@@ -36,7 +36,7 @@ logger = logging.getLogger("mcp.server")
 mcp = MCPServer(name="stock-multi-agent")
 
 # ── Tool 등록 ─────────────────────────────────────────────────────────
-# (함수, 설명) — 파라미터 스키마는 함수 시그니처에서 자동 추출됩니다.
+# (함수, 설명) 목록. 파라미터 스키마는 함수 시그니처에서 자동 추출됩니다.
 _TOOLS = [
     (
         get_price_data,

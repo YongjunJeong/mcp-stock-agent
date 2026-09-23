@@ -112,7 +112,7 @@ async def remove_ticker(ticker: str) -> bool:
 
 
 async def save_analysis(result: dict) -> None:
-    """분석 결과 저장. 예외는 절대 전파하지 않음 — 분석 흐름을 방해해선 안 됨."""
+    """분석 결과 저장. 저장에 실패해도 예외를 밖으로 내보내지 않습니다(분석 응답을 막지 않도록)."""
     try:
         scores = result.get("scores", {})
         now_utc = datetime.now(UTC).isoformat()

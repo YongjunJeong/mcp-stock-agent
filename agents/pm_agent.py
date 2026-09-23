@@ -121,7 +121,7 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
         buy_signal  = False
         signal_text = "⚠️ 매수 보류 (매크로 지표 확인 불가)"
         logger.warning(
-            f"[PM Agent] {ticker} — 매크로 지표를 가져오지 못해 매수 신호를 보류합니다."
+            f"[PM Agent] {ticker}: 매크로 지표를 가져오지 못해 매수 신호를 보류합니다."
         )
     elif alerts.get("safety_brake", False):
         safety_brake = True

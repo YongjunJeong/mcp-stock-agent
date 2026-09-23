@@ -121,7 +121,7 @@ def clear_cache() -> None:
 async def run_macro_agent() -> dict:
     """
     매크로 분석 결과를 반환합니다. TTL 안에서는 캐시된 결과를 공유합니다.
-    ticker 파라미터 없음 — 전체 시장 지표를 분석합니다.
+    종목과 무관하게 시장 전체 지표를 분석합니다.
 
     동시에 여러 요청이 들어와도 락으로 묶어 실제 수집은 한 번만 합니다.
     데이터 조회에 실패한 결과는 캐시하지 않아 다음 호출에서 다시 시도합니다.
@@ -306,7 +306,7 @@ def _fallback_score(macro: dict) -> int:
     elif fx_cur < 1350:
         score += 10
 
-    # 속도(Velocity) 패널티 — 비선형 적용
+    # 속도(Velocity) 패널티, 위험 가중치만큼 비선형으로 적용
     if alerts.get("velocity"):
         score -= int(10 * risk_wt)         # Panic Zone에서 최대 50점
     elif roc_3d > 0.5:

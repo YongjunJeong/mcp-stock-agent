@@ -35,7 +35,7 @@ async def get_financial_statements(ticker: str) -> dict:
     try:
         per, eps, pbr, bps, div_yield = await _scrape_naver_fundamental(ticker)
 
-        # 시가총액 (pykrx — 동기 라이브러리라 스레드로 분리)
+        # 시가총액 (pykrx는 동기 라이브러리라 스레드로 분리)
         market_cap = await asyncio.to_thread(_get_market_cap, ticker)
 
         valuation_signal = _valuation_signal(per, pbr)
@@ -107,10 +107,10 @@ async def _scrape_naver_fundamental(ticker: str):
                     return None
         return None
 
-    # PER (단위: 배) — 첫 번째 PER 항목 (실적 PER)
+    # PER (단위: 배), 첫 번째 PER 항목 = 실적 PER
     per = find_value_after("PER", "배")
 
-    # EPS (단위: 원) — 첫 번째 EPS 항목
+    # EPS (단위: 원), 첫 번째 EPS 항목
     eps = find_value_after("EPS", "원")
 
     # PBR (단위: 배 또는 N/A)

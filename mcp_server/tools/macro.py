@@ -66,7 +66,7 @@ async def get_macro_indicators(days: int = 30) -> dict:
             jpy_task     = _fetch_jpy_usd(session, days)
             kospi_task   = _fetch_kospi(session)
             foreign_task = _fetch_foreign_flow(session)
-            us_task      = _fetch_us_markets()   # yfinance — thread executor 실행
+            us_task      = _fetch_us_markets()   # yfinance, 스레드에서 실행
 
             usd_krw, jpy_usd, kospi, foreign_flow, us_markets = await asyncio.gather(
                 usd_task, jpy_task, kospi_task, foreign_task, us_task
@@ -328,7 +328,7 @@ async def _fetch_foreign_flow(session: aiohttp.ClientSession) -> dict:
         if net is None:
             # 페이지 구조가 바뀌면 조용히 중립 처리되어 점수만 틀어지므로 로그를 남깁니다.
             logger.warning(
-                "외국인 수급 파싱 실패 — 페이지 구조 변경 가능성 "
+                "외국인 수급 파싱 실패. 페이지 구조가 바뀌었을 수 있습니다 "
                 f"(파싱된 라벨: {list(result.keys()) or '없음'})"
             )
 
@@ -415,11 +415,11 @@ async def _fetch_us_markets() -> dict:
 
 
 def _fetch_us_markets_sync() -> dict:
-    """yfinance 동기 호출 — executor 전용. 직접 호출 시 이벤트루프 차단."""
+    """yfinance 동기 호출. 스레드에서만 부릅니다(직접 부르면 이벤트 루프가 멈춤)."""
     try:
         import yfinance as yf
     except ImportError:
-        logger.warning("yfinance 미설치 — pip install yfinance")
+        logger.warning("yfinance가 설치되어 있지 않습니다 (pip install yfinance)")
         return {"error": "yfinance 미설치"}
 
     symbols = {

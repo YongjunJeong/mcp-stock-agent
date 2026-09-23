@@ -1,5 +1,5 @@
 """
-메인 진입점 — Slack Bot + 스케줄러를 동시에 실행합니다.
+메인 진입점. Slack Bot과 스케줄러를 함께 실행합니다.
 
 실행:
   python main.py
