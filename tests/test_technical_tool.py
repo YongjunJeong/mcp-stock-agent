@@ -1,4 +1,4 @@
-"""기술적 지표 Tool — 신호 해석과 파이프라인 동작."""
+"""기술적 지표 Tool: 신호 해석과 파이프라인 동작."""
 import math
 
 import numpy as np

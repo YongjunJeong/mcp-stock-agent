@@ -1,4 +1,4 @@
-"""PM Agent 종합 로직 — 가중합, Safety Brake, Delta, 예외 격리."""
+"""PM Agent 종합 로직: 가중합, Safety Brake, Delta, 예외 격리."""
 from datetime import UTC, datetime, timedelta
 
 import pytest

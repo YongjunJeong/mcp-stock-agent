@@ -1,4 +1,4 @@
-"""SQLite 레이어 — 워치리스트 CRUD와 분석 히스토리."""
+"""SQLite 레이어: 워치리스트 CRUD와 분석 히스토리."""
 import pytest
 
 from db import database as db

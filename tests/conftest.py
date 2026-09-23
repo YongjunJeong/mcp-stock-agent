@@ -1,4 +1,4 @@
-"""pytest 공통 설정 — 리포지토리 루트를 import 경로에 올립니다."""
+"""pytest 공통 설정. 리포지토리 루트를 import 경로에 올립니다."""
 import sys
 from pathlib import Path
 
