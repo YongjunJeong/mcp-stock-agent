@@ -10,35 +10,21 @@ Multi-Agent 분석 결과를 Slack Block Kit으로 표시합니다.
   @봇 도움
 """
 
-import asyncio
 import logging
 import os
 import re
-import sys
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from db.database import get_watchlist, add_ticker, remove_ticker, get_history
-from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
-from slack_sdk.web.async_client import AsyncWebClient
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
-load_dotenv(ROOT / ".env")
+from db.database import get_watchlist, add_ticker, remove_ticker, get_history
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("slack-bot")
 
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
-SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
-
-app = AsyncApp(token=SLACK_BOT_TOKEN)
+# 앱 객체는 토큰이 있어야 만들 수 있으므로 start_bot()에서 생성합니다.
+# 모듈 최상위에서 만들면 토큰 없이는 import조차 못 해 테스트가 불가능합니다.
 
 # ── 회사명 → ticker 매핑 (한국 주식만, 이 프로젝트는 KR 전용) ──────
 COMPANY_MAP: dict[str, str] = {
@@ -289,7 +275,9 @@ def _score_bar(score: int, length: int = 10) -> str:
 
 
 # ── 분석 실행 + Slack 답장 ───────────────────────────────────────────
-async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> None:
+async def _analyze_and_reply(
+    ticker: str, say, client, thread_ts: str | None = None
+) -> None:
     """Multi-Agent 분석을 실행하고 Slack에 결과를 전송합니다."""
     from agents.pm_agent import run_full_analysis
 
@@ -486,9 +474,8 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
                 },
             })
 
-        # 로딩 메시지 → 결과로 교체
-        sdk = AsyncWebClient(token=SLACK_BOT_TOKEN)
-        await sdk.chat_update(
+        # 로딩 메시지 → 결과로 교체 (bolt가 주입한 client 사용)
+        await client.chat_update(
             channel=loading["channel"],
             ts=loading["ts"],
             text=f"{emoji} {company} 분석 완료 (Final: {final}/100 | {signal})",
@@ -501,8 +488,7 @@ async def _analyze_and_reply(ticker: str, say, thread_ts: str | None = None) -> 
 
 
 # ── 이벤트 핸들러 ─────────────────────────────────────────────────────
-@app.event("app_mention")
-async def handle_mention(event, say):
+async def handle_mention(event, say, client):
     text       = event.get("text", "")
     thread     = event.get("thread_ts") or event.get("ts")
     text_clean = re.sub(r"<@[A-Z0-9]+>", "", text).strip().lower()
@@ -533,20 +519,35 @@ async def handle_mention(event, say):
         )
         return
 
-    await _analyze_and_reply(ticker, say, thread_ts=thread)
-
-
-@app.event("message")
-async def handle_message(event, logger):
-    pass
+    await _analyze_and_reply(ticker, say, client, thread_ts=thread)
 
 
 # ── Bot 시작 ──────────────────────────────────────────────────────────
+def create_app() -> AsyncApp:
+    """Slack 앱을 만들고 이벤트 핸들러를 등록합니다."""
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("SLACK_BOT_TOKEN 환경변수가 없습니다.")
+
+    app = AsyncApp(token=token)
+
+    app.event("app_mention")(handle_mention)
+
+    # 채널의 일반 메시지는 무시합니다.
+    # 핸들러를 등록해두지 않으면 bolt가 매번 미처리 경고를 남깁니다.
+    @app.event("message")
+    async def _ignore_message(event):
+        pass
+
+    return app
+
+
 async def start_bot():
-    handler = AsyncSocketModeHandler(app, SLACK_APP_TOKEN)
+    app_token = os.getenv("SLACK_APP_TOKEN")
+    if not app_token:
+        raise RuntimeError("SLACK_APP_TOKEN 환경변수가 없습니다.")
+
+    handler = AsyncSocketModeHandler(create_app(), app_token)
     logger.info("Slack Multi-Agent Bot 시작 (Socket Mode)")
     await handler.start_async()
 
-
-if __name__ == "__main__":
-    asyncio.run(start_bot())
