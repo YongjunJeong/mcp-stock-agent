@@ -12,6 +12,7 @@ Final_Score = (Tech × 0.30) + (Fund × 0.35) + (Macro × 0.20) + (Sent × 0.15)
 
 매수 신호 임계값: Final_Score ≥ 70
 """
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -57,7 +58,7 @@ STRATEGY_END"""
 
 async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     """
-    4개 Agent를 순차 실행하고 PM Agent가 종합합니다.
+    4개 Agent를 병렬 실행하고 PM Agent가 종합합니다.
 
     Returns:
         dict: {
@@ -77,11 +78,20 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     _prev_records = await get_history(ticker, 1)
     _prev = _prev_records[0] if _prev_records else None
 
-    # ── Step 1: 4개 전문가 Agent 순차 실행 ────────────────────────
-    tech_result  = await run_technical_agent(ticker, period)
-    fund_result  = await run_fundamental_agent(ticker)
-    macro_result = await run_macro_agent()          # ticker 무관, 시장 전체 지표
-    sent_result  = await run_sentiment_agent(ticker, days=7)
+    # ── Step 1: 4개 전문가 Agent 병렬 실행 ────────────────────────
+    # 서로 의존하지 않으므로 동시에 돌립니다.
+    # return_exceptions=True: 한 에이전트가 터져도 나머지 분석은 살립니다.
+    _raw_results = await asyncio.gather(
+        run_technical_agent(ticker, period),
+        run_fundamental_agent(ticker),
+        run_macro_agent(),          # ticker 무관, 시장 전체 지표
+        run_sentiment_agent(ticker, days=7),
+        return_exceptions=True,
+    )
+    tech_result, fund_result, macro_result, sent_result = [
+        _neutral_on_error(r, label)
+        for r, label in zip(_raw_results, ("기술적", "펀더멘털", "매크로", "감성"))
+    ]
 
     tech_score  = tech_result["score"]
     fund_score  = fund_result["score"]
@@ -171,6 +181,23 @@ async def run_full_analysis(ticker: str, period: str = "6mo") -> dict:
     }
     from db.database import save_analysis
     await save_analysis(result)
+    return result
+
+
+# ── 에이전트 예외 처리 ───────────────────────────────────────────────
+
+def _neutral_on_error(result, label: str) -> dict:
+    """
+    gather(return_exceptions=True)가 돌려준 값을 정규화합니다.
+    한 에이전트가 예외로 죽어도 나머지 3개로 분석을 이어갑니다.
+    """
+    if isinstance(result, BaseException):
+        logger.error(f"[{label} Agent] 예외 발생: {result}", exc_info=result)
+        return {
+            "score": 50,
+            "report": f"{label} 분석 중 오류가 발생해 중립 처리했습니다: {result}",
+            "raw_data": {},
+        }
     return result
 
 
