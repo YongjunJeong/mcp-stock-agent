@@ -542,7 +542,7 @@ mcp-stock-agent/
 
 | 데이터 | 소스 | 무료 | 한계 |
 |-------|------|------|------|
-| 한국 주식 OHLCV | pykrx (KRX) | ✅ | T+1 딜레이 |
+| 한국 주식 OHLCV | pykrx (KRX) | ✅ | T+1 딜레이, KRX 데이터 포털 회원 로그인 필요 |
 | 한국 재무 지표 | Naver Finance (스크래핑) | ✅ | pykrx 재무 API 서버 장애로 대체 |
 | 뉴스 감성 | Naver 모바일 JSON API | ✅ | 한국어 뉴스만 |
 | USD/KRW, JPY/USD | Frankfurter (ECB) | ✅ | ECB 공시 기준, 하루 딜레이 |
@@ -574,9 +574,16 @@ GEMINI_API_KEY=AIza...
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 SLACK_CHANNEL_ID=C...
+KRX_ID=...                           # KRX 데이터 포털 계정 (pykrx 시세 조회)
+KRX_PW=...
 WATCHLIST_KR=005930,000660,035420   # 첫 실행 시 DB 시드로 사용
 SIGNAL_THRESHOLD_STRONG=70
 ```
+
+> **KRX 계정이 필요합니다.** pykrx는 1.2.5부터 KRX 데이터 포털(https://data.krx.co.kr)
+> 회원 로그인을 지원하고, 1.2.9 문서는 `KRX_ID`/`KRX_PW`를 필수로 명시합니다.
+> 계정 없이 시세 조회가 실패하면 기술적 에이전트는 중립 점수(50)로 처리되고
+> Slack 카드의 현재가는 N/A로 표시됩니다.
 
 ### 방법 1 — Docker (권장)
 
