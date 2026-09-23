@@ -24,7 +24,7 @@ THRESHOLD = int(os.getenv("SIGNAL_THRESHOLD_STRONG", "70"))
 
 async def _notify_slack(result: dict) -> None:
     """매수 신호 발생 시 Slack 채널에 알림을 전송합니다."""
-    from slack.bot import _to_slack_md, _score_emoji, _score_bar
+    from slack_bot.bot import _to_slack_md, _score_emoji, _score_bar
 
     token      = os.getenv("SLACK_BOT_TOKEN")
     channel_id = os.getenv("SLACK_CHANNEL_ID")

@@ -26,7 +26,7 @@ async def main():
     await init_db()
     logger.info("DB 초기화 완료")
 
-    from slack.bot import start_bot
+    from slack_bot.bot import start_bot
     from scheduler.cron import create_scheduler
 
     # 스케줄러 시작
