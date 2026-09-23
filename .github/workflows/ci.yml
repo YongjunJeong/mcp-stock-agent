@@ -83,6 +83,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: aarch64 바이너리 휠 확인
+        # 빌더에 컴파일러가 없으므로 모든 의존성이 휠로 받아져야 합니다.
+        # ARM 이미지를 QEMU로 빌드하는 대신 휠 존재 여부만 빠르게 확인합니다.
+        run: |
+          pip download --only-binary=:all: --python-version 3.13 --implementation cp \
+            --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \
+            --platform manylinux_2_28_aarch64 \
+            -r requirements.txt -d /tmp/wheels-aarch64 -q
       - name: 이미지 빌드
         run: docker build -t mcp-stock-agent:ci .
       - name: 이미지 안에서 임포트 확인
