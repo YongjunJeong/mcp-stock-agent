@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Dockerfile이 3.13을 쓰므로 3.13을 포함하고,
+        # 하한(3.11)도 함께 돌려 문법/타입 힌트 호환을 확인합니다.
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 테스트
+        run: pytest -q
+
+      - name: 전체 모듈 임포트 확인
+        # 네트워크 호출 없이 import만 검증합니다.
+        # 의존성 드리프트로 엔트리포인트가 깨지는 경우를 잡기 위한 단계입니다.
+        run: |
+          python - <<'EOF'
+          import importlib
+          mods = [
+              "logging_config", "db.database", "mcp_server.indicators",
+              "mcp_server.tools.price", "mcp_server.tools.technical",
+              "mcp_server.tools.pattern", "mcp_server.tools.fundamental",
+              "mcp_server.tools.sentiment", "mcp_server.tools.macro",
+              "mcp_server.server", "agents.gemini_client", "agents.technical_agent",
+              "agents.fundamental_agent", "agents.macro_agent",
+              "agents.sentiment_agent", "agents.pm_agent",
+              "scheduler.cron", "slack_bot.bot", "main",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+              print("OK", m)
+          EOF
+
+      - name: MCP Tool 등록 확인
+        run: |
+          python - <<'EOF'
+          import asyncio
+          from mcp_server.server import mcp
+          tools = asyncio.run(mcp.list_tools())
+          names = sorted(t.name for t in tools)
+          expected = sorted([
+              "get_price_data", "get_technical_indicators", "analyze_chart_pattern",
+              "get_financial_statements", "get_news_sentiment", "get_macro_indicators",
+          ])
+          assert names == expected, f"{names} != {expected}"
+          print(f"MCP tool {len(tools)}개 등록 확인")
+          EOF
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 이미지 빌드
+        run: docker build -t mcp-stock-agent:ci .
+      - name: 이미지 안에서 임포트 확인
+        # pandas-ta의 numba 누락처럼 런타임에야 드러나는 문제를 빌드 단계에서 잡습니다.
+        run: |
+          docker run --rm mcp-stock-agent:ci python -c "
+          import mcp_server.tools.technical, agents.pm_agent, slack_bot.bot
+          print('컨테이너 임포트 OK')
+          "
