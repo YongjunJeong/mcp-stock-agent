@@ -10,4 +10,7 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
 def setup_logging(level: int = logging.INFO) -> None:
-    logging.basicConfig(level=level, format=LOG_FORMAT)
+    # force=True: 라이브러리가 먼저 basicConfig를 호출해도 엔트리포인트 설정이 이깁니다.
+    # (mcp의 MCPServer는 생성자에서 format="%(message)s"로 설정해버립니다.)
+    # 출력은 기본값인 stderr로 갑니다. MCP stdio 모드에서 stdout은 프로토콜 채널입니다.
+    logging.basicConfig(level=level, format=LOG_FORMAT, force=True)
