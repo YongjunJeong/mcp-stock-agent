@@ -7,6 +7,7 @@ import asyncio
 import logging
 import math
 from datetime import datetime, timedelta
+from typing import Literal
 
 from pykrx import stock as krx
 
@@ -18,7 +19,10 @@ logger = logging.getLogger("mcp.tools.technical")
 _MIN_BARS = 60
 
 
-async def get_technical_indicators(ticker: str, period: str = "6mo") -> dict:
+async def get_technical_indicators(
+    ticker: str,
+    period: Literal["3mo", "6mo", "1y"] = "6mo",
+) -> dict:
     """
     RSI, MACD, Bollinger Bands, Volume Ratio를 계산합니다.
 

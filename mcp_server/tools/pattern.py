@@ -6,6 +6,7 @@ Double Bottom, IH&S, 박스권 돌파, 삼각수렴 패턴을 근사 알고리�
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import Literal
 
 import numpy as np
 from pykrx import stock as krx
@@ -13,7 +14,10 @@ from pykrx import stock as krx
 logger = logging.getLogger("mcp.tools.pattern")
 
 
-async def analyze_chart_pattern(ticker: str, period: str = "6mo") -> dict:
+async def analyze_chart_pattern(
+    ticker: str,
+    period: Literal["3mo", "6mo", "1y"] = "6mo",
+) -> dict:
     """
     최근 가격 데이터에서 주요 차트 패턴을 탐지합니다.
 
