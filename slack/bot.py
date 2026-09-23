@@ -141,13 +141,20 @@ _CMD_ADD     = re.compile(r"^추가\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
 _CMD_REMOVE  = re.compile(r"^(?:제거|삭제)\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
 _CMD_LIST    = re.compile(r"^워치리스트$")
 _CMD_HISTORY = re.compile(r"^히스토리\s+([0-9]{6}|[가-힣a-zA-Z]+\S*)$")
+# 메시지 전체가 도움말 요청일 때만 매칭합니다.
+# 예전에는 "?" 부분일치로 판정해서 `@봇 카카오 사도 돼?` 같은
+# 분석 요청까지 도움말로 빠졌습니다.
+_CMD_HELP    = re.compile(r"^(?:도움말?|help|사용법)$")
 
 
 def _parse_command(text_clean: str) -> tuple[str, str | None] | None:
     """
-    워치리스트 관리 명령 파싱.
-    Returns: ("add"|"remove"|"list"|"history", ticker_arg|None) or None
+    멘션 명령 파싱.
+    Returns: ("help"|"add"|"remove"|"list"|"history", ticker_arg|None) or None
     """
+    if _CMD_HELP.match(text_clean):
+        return ("help", None)
+
     m = _CMD_ADD.match(text_clean)
     if m:
         return ("add", m.group(1))
@@ -234,6 +241,39 @@ async def _handle_watchlist_command(
             await say(thread_ts=thread, text=f"📭 `{ticker}` 분석 히스토리가 없습니다.")
             return
         await say(thread_ts=thread, text=_build_history_block(ticker, records))
+
+
+# ── 도움말 ────────────────────────────────────────────────────────────
+def _help_blocks() -> list[dict]:
+    """도움말 메시지의 Slack Block Kit 구성."""
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*📈 멀티에이전트 주식 분석 봇 사용법*\n\n"
+                    "*종목 분석 (한국 주식):*\n"
+                    "• `@봇 삼성전자`\n"
+                    "• `@봇 005930`\n"
+                    "• `@봇 하이닉스 분석해줘`\n"
+                    "• `@봇 카카오 사도 돼?`\n\n"
+                    "*워치리스트 관리:*\n"
+                    "• `@봇 워치리스트` → 현재 목록 조회\n"
+                    "• `@봇 추가 005930` → 종목 추가\n"
+                    "• `@봇 제거 005930` → 종목 제거\n"
+                    "• `@봇 히스토리 005930` → 최근 5회 분석 기록\n\n"
+                    "*분석 구성:*\n"
+                    "• 📈 기술적 에이전트 (RSI, MACD, 패턴) × 30%\n"
+                    "• 📋 펀더멘털 에이전트 (PER, EPS) × 35%\n"
+                    "• 🌐 매크로 에이전트 (환율·수급) × 20%\n"
+                    "• 📰 감성 에이전트 (뉴스 심리) × 15%\n"
+                    "• 🏦 PM 에이전트 (종합 의견)\n\n"
+                    "• `@봇 도움` → 이 메시지"
+                ),
+            },
+        }
+    ]
 
 
 # ── 스코어 → 이모지 ──────────────────────────────────────────────────
@@ -459,47 +499,14 @@ async def handle_mention(event, say):
     thread     = event.get("thread_ts") or event.get("ts")
     text_clean = re.sub(r"<@[A-Z0-9]+>", "", text).strip().lower()
 
-    # 도움말
-    if any(k in text_clean for k in ("도움", "help", "사용법", "?")):
-        await say(
-            thread_ts=thread,
-            text="사용법",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": (
-                            "*📈 멀티에이전트 주식 분석 봇 사용법*\n\n"
-                            "*종목 분석 (한국 주식):*\n"
-                            "• `@봇 삼성전자`\n"
-                            "• `@봇 005930`\n"
-                            "• `@봇 하이닉스 분석해줘`\n"
-                            "• `@봇 카카오 사도 돼?`\n\n"
-                            "*워치리스트 관리:*\n"
-                            "• `@봇 워치리스트` → 현재 목록 조회\n"
-                            "• `@봇 추가 005930` → 종목 추가\n"
-                            "• `@봇 제거 005930` → 종목 제거\n"
-                            "• `@봇 히스토리 005930` → 최근 5회 분석 기록\n\n"
-                            "*분석 구성:*\n"
-                            "• 📈 기술적 에이전트 (RSI, MACD, 패턴) × 30%\n"
-                            "• 📋 펀더멘털 에이전트 (PER, EPS) × 35%\n"
-                            "• 🌐 매크로 에이전트 (환율·수급) × 20%\n"
-                            "• 📰 감성 에이전트 (뉴스 심리) × 15%\n"
-                            "• 🏦 PM 에이전트 (종합 의견)\n\n"
-                            "• `@봇 도움` → 이 메시지"
-                        ),
-                    },
-                }
-            ],
-        )
-        return
-
-    # 워치리스트 관리 명령 분기
+    # 명령 분기 (도움말 / 워치리스트 관리)
     cmd_result = _parse_command(text_clean)
     if cmd_result:
         cmd, arg = cmd_result
-        await _handle_watchlist_command(cmd, arg, say, thread)
+        if cmd == "help":
+            await say(thread_ts=thread, text="사용법", blocks=_help_blocks())
+        else:
+            await _handle_watchlist_command(cmd, arg, say, thread)
         return
 
     # 종목 분석

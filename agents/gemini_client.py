@@ -75,18 +75,22 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
     return ""
 
 
+_SCORE_RE = re.compile(r"SCORE\s*[:：]\s*(\d{1,3})", re.IGNORECASE)
+
+NEUTRAL_SCORE = 50
+
+
 def extract_score(text: str) -> int:
     """
     응답 텍스트에서 'SCORE: 숫자' 형식의 점수를 추출합니다.
     0~100 범위를 벗어나면 클램핑합니다.
+
+    마커를 못 찾으면 중립값(50)을 돌려줍니다.
+    예전에는 '본문의 마지막 세 자리 이하 숫자'를 점수로 썼는데,
+    리포트 끝의 목표가나 등락률(-9% 등)을 점수로 오인하는 문제가 있었습니다.
     """
-    m = re.search(r"SCORE\s*[:：]\s*(\d+)", text, re.IGNORECASE)
-    if m:
-        return max(0, min(100, int(m.group(1))))
-    # 대안: 마지막으로 나오는 두 자리 숫자
-    nums = re.findall(r"\b(\d{1,3})\b", text)
-    if nums:
-        candidate = int(nums[-1])
-        if 0 <= candidate <= 100:
-            return candidate
-    return 50  # 파싱 실패 시 중립값
+    matches = _SCORE_RE.findall(text or "")
+    if not matches:
+        return NEUTRAL_SCORE
+    # 여러 번 등장하면 마지막 것이 최종 점수입니다.
+    return max(0, min(100, int(matches[-1])))

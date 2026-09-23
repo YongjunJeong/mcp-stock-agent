@@ -115,21 +115,26 @@ SCORE를 마지막 줄에 출력하세요."""
 
 # ── 폴백 ─────────────────────────────────────────────────────────────
 
+# _valuation_signal()이 돌려주는 값과 1:1로 대응시킵니다.
+# 부분일치(`"고평가" in "심한고평가"`)로 분기를 태우면 더 강한 신호가
+# 약한 분기에 먼저 걸려버리므로 정확히 일치하는 표로 관리합니다.
+_VALUATION_DELTA = {
+    "심한저평가":        +30,
+    "저평가":            +15,
+    "적정가치":            0,
+    "고평가":            -15,
+    "심한고평가":        -25,
+    "적자기업":          -20,
+    "PER없음(적자추정)": -20,
+}
+
+
 def _fallback_score(fund: dict) -> int:
     score = 50
     sig = fund.get("signals", {}).get("valuation", "")
     val = fund.get("valuation", {})
 
-    if "심한저평가" in sig:
-        score += 30
-    elif "저평가" in sig:
-        score += 15
-    elif "고평가" in sig:
-        score -= 15
-    elif "심한고평가" in sig:
-        score -= 25
-    elif "적자" in sig:
-        score -= 20
+    score += _VALUATION_DELTA.get(sig, 0)
 
     div = val.get("div_yield") or 0
     if div >= 3.0:

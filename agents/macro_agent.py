@@ -166,9 +166,9 @@ def _build_prompt(macro: dict) -> str:
     k_sig   = kospi.get("signal", "N/A")
 
     # 외국인
-    net_buy = flow.get("net_buy_billion")
+    net_buy = flow.get("net_buy_eok_krw")
     f_sig   = flow.get("signal", "N/A")
-    net_text = f"{net_buy:+,.1f}억원" if isinstance(net_buy, float) else "N/A"
+    net_text = f"{net_buy:+,.1f}억원" if isinstance(net_buy, (int, float)) else "N/A"
 
     # 엔화 비교 (원화 단독 약세 판별)
     jpy_trend = jpy.get("trend", "N/A")
