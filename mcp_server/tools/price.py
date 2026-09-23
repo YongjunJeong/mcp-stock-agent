@@ -5,13 +5,17 @@ Tool 1: get_price_data
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import Literal
 
 from pykrx import stock as krx
 
 logger = logging.getLogger("mcp.tools.price")
 
 
-async def get_price_data(ticker: str, period: str = "6mo") -> dict:
+async def get_price_data(
+    ticker: str,
+    period: Literal["1mo", "3mo", "6mo", "1y"] = "6mo",
+) -> dict:
     """
     pykrx로 한국 주식 OHLCV 데이터를 조회합니다.
 
