@@ -86,7 +86,7 @@
 │                        PM Agent (종합 판단)                             │
 │                                                                      │
 │  ① 분석 시작 전  →  이전 기록 조회 (Memory Layer)                          │
-│  ② 4개 에이전트 실행 후  →  Delta 계산 (점수 변화량·신호 전환)                 │
+│  ② 4개 에이전트 병렬 실행 후 →  Delta 계산 (점수 변화량·신호 전환)              │
 │  ③ Gemini 프롬프트에 Delta 컨텍스트 주입                                   │
 │  ④ 분석 완료 후  →  결과를 analysis_history에 자동 저장                     │
 │                                                                      │
@@ -94,6 +94,7 @@
 │                                                                      │
 │  Safety Brake: USD/KRW ≥ 1,450 AND 3일 ROC > 1%                      │
 │  → buy_signal 강제 False, Final Score 상한 35점                         │
+│  매크로 조회 실패 시에도 buy_signal 보류 (fail-safe)                        │
 └──────┬───────────┬──────────────┬──────────────┬────────────────────┘
        │           │              │              │
        ▼           ▼              ▼              ▼
@@ -120,7 +121,7 @@
        pykrx (KRX OHLCV)         에이전트당 1회 호출
        Naver Finance API         thinking_budget=0
        Frankfurter (환율)         temperature=0.3
-       yfinance (미국 시장)        max_output_tokens=1024
+       yfinance (미국 시장)        전문가 1024 / PM 2048 토큰
 
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -405,15 +406,15 @@ VIX ≥ 35   →  ⛔ 극도 공포 (Safety Brake 복합 → 최고경보)
 ### 6. Gemini `thinking_budget=0` 설정
 
 Gemini 2.5 Flash는 기본적으로 출력 전 "thinking 토큰"을 소비합니다.
-`max_output_tokens=1024` 제한 하에서 thinking 토큰이 실제 분석 리포트를 잘리게 합니다.
+제한된 출력 예산 하에서 thinking 토큰이 실제 분석 리포트를 잘리게 합니다.
 
 ```python
-response = client.models.generate_content(
+response = await client.aio.models.generate_content(
     model="gemini-2.5-flash",
     config=GenerateContentConfig(
         thinking_config=ThinkingConfig(thinking_budget=0),  # 핵심
         temperature=0.3,
-        max_output_tokens=1024,
+        max_output_tokens=max_output_tokens,   # 전문가 1024 / PM 2048
     ),
 )
 ```
@@ -430,6 +431,31 @@ async def save_analysis(result: dict) -> None:
 ```
 
 DB 레이어 장애가 메인 분석 파이프라인에 영향을 주지 않도록 격리합니다.
+
+### 8. 보조지표를 직접 계산
+
+RSI·MACD·볼린저밴드는 `mcp_server/indicators.py`에서 pandas로 직접 계산합니다.
+원래 `pandas-ta`를 썼지만 세 가지 이유로 걷어냈습니다.
+
+- 0.4 계열부터 `numba`를 import 시점에 필수로 요구해, 빌드 시간을 줄이려던
+  `--no-deps` 설치와 정면으로 충돌합니다 (컨테이너가 뜨긴 하는데 분석 요청마다 실패).
+- ARM(aarch64) 휠 문제로 빌드가 반복적으로 깨졌습니다.
+- 실제로 쓰는 함수는 3개뿐입니다.
+
+계산 규약은 pandas-ta와 동일하게 맞췄고(RSI는 Wilder RMA, MACD의 EMA는 SMA 시드,
+볼린저는 표본표준편차), `tests/test_indicators.py`가 테스트 안의 독립 구현과
+대조해 검증합니다.
+
+### 9. async 함수 안의 동기 호출 제거
+
+`async def`로 선언해도 안에서 동기 I/O를 하면 이벤트 루프 전체가 멈춥니다.
+분석 한 건에 수 분이 걸리는데 그동안 Slack Socket Mode 하트비트와
+스케줄러가 같이 멈추는 상태였습니다.
+
+- Gemini: `client.models` → `client.aio.models`
+- pykrx(동기 라이브러리): `asyncio.to_thread`로 분리
+- 4개 전문가 에이전트: 서로 독립이므로 `asyncio.gather`로 병렬 실행
+  (`return_exceptions=True` — 하나가 죽어도 나머지로 분석을 이어감)
 
 ---
 
@@ -452,15 +478,16 @@ mcp-stock-agent/
 │
 ├── mcp_server/                     # MCP Tool 레이어
 │   ├── server.py                   # MCP 서버 (6개 도구, stdio transport)
+│   ├── indicators.py               # RSI · MACD · 볼린저 (pandas 직접 계산)
 │   └── tools/
 │       ├── price.py                # OHLCV 데이터 (pykrx)
-│       ├── technical.py            # 기술적 지표 (pandas-ta)
+│       ├── technical.py            # 기술적 지표 (indicators.py 사용)
 │       ├── pattern.py              # 차트 패턴 감지 (numpy 선형회귀)
 │       ├── fundamental.py          # 재무 지표 (Naver Finance 스크래핑)
 │       ├── sentiment.py            # 뉴스 감성 (Naver 모바일 JSON API)
 │       └── macro.py                # 매크로 지표 (Frankfurter · Naver · yfinance)
 │
-├── slack/
+├── slack_bot/
 │   └── bot.py                      # Socket Mode 봇 · Block Kit UI · 워치리스트 명령 · Memory 델타 표시
 │
 ├── scheduler/
@@ -469,8 +496,20 @@ mcp-stock-agent/
 ├── data/                           # 런타임 DB (gitignore, Docker named volume 사용)
 │   └── stock_agent.db              # 자동 생성 — 커밋하지 않음
 │
+├── tests/                          # pytest 스위트 (148개)
+│   ├── test_indicators.py          # 지표 수식 (독립 참조 구현과 대조)
+│   ├── test_slack_parsing.py       # 멘션·명령 파싱
+│   ├── test_scoring.py             # SCORE 추출 · 규칙 기반 폴백
+│   ├── test_macro.py               # 환율 구간 · 속도 경보 · 종합 신호
+│   ├── test_pm_agent.py            # 가중합 · Safety Brake · Delta
+│   ├── test_technical_tool.py      # 지표 파이프라인
+│   └── test_db.py                  # 워치리스트 CRUD · 히스토리
+│
+├── .github/workflows/ci.yml        # 테스트 · 임포트 · Docker 빌드 검증
 ├── main.py                         # 진입점 (init_db → 스케줄러 → Slack Bot)
+├── logging_config.py               # 엔트리포인트 공용 로깅 설정
 ├── requirements.txt
+├── requirements-dev.txt
 ├── Dockerfile                      # 멀티스테이지 빌드 (builder + runtime)
 ├── docker-compose.yml              # named volume · 환경변수 주입 · 로그 순환
 ├── .env.example                    # 환경변수 템플릿
@@ -484,7 +523,7 @@ mcp-stock-agent/
 | 영역 | 기술 | 선택 이유 |
 |------|-----|----------|
 | AI / LLM | Gemini 2.5 Flash | 무료 티어, 100만 토큰 컨텍스트, 빠른 속도 |
-| 에이전트 프로토콜 | MCP (Anthropic) | Tool 스키마 표준화, 에이전트-도구 분리 |
+| 에이전트 프로토콜 | MCP (Anthropic) | Tool 스키마 표준화, 에이전트-도구 분리 (스키마는 타입 힌트에서 자동 생성) |
 | Slack 연동 | slack-bolt (Socket Mode) | 공개 URL 불필요, WebSocket 기반 |
 | 스케줄러 | APScheduler | asyncio 네이티브, cron 문법 지원 |
 | DB | SQLite + aiosqlite | 서버리스, asyncio 비블로킹 I/O, 외부 의존성 없음 |
@@ -492,9 +531,10 @@ mcp-stock-agent/
 | 미국 시장 | yfinance | S&P500·NASDAQ·VIX 무료 수집 |
 | 한국 시장 | pykrx + Naver Finance | OHLCV + 재무지표 (pykrx 재무 API 불안정 → Naver 스크래핑으로 대체) |
 | 비동기 HTTP | aiohttp | asyncio.gather로 병렬 데이터 수집 |
-| 기술적 지표 | pandas-ta | RSI, MACD, 볼린저밴드 |
+| 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드 — 의존성 최소화 및 계산 검증 용이 |
 | 패턴 감지 | numpy | 이중바닥, 역헤드앤숄더, 삼각수렴 (선형회귀 기반) |
 | 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드 |
+| 테스트 | pytest + pytest-asyncio | 순수 로직 148개 케이스, GitHub Actions에서 3.11/3.13 실행 |
 
 ---
 
@@ -509,6 +549,14 @@ mcp-stock-agent/
 | S&P500, NASDAQ, VIX | yfinance (Yahoo Finance) | ✅ | 비공식 API, 간헐적 제한 가능 |
 | KOSPI, KOSDAQ | Naver 모바일 API | ✅ | 실시간 (15분 지연) |
 | 외국인 수급 | Naver Finance (스크래핑) | ✅ | 일별 집계만 제공 |
+
+### 점수에 대해
+
+Final Score는 4개 에이전트가 LLM으로 매긴 점수의 고정 가중합입니다.
+가중치와 임계값(70)은 위에 적은 근거로 정한 값이며 **백테스트로 검증한 수치가 아닙니다.**
+PM 리포트의 진입가·목표가·손절기준도 LLM 생성물이고 변동성 모델이나 포지션 사이징에
+기반하지 않습니다. 이 프로젝트는 멀티에이전트 오케스트레이션 구현 예제이지
+투자 판단 도구가 아닙니다.
 
 ---
 
@@ -555,6 +603,23 @@ cp .env.example .env   # 실제 키 입력
 python main.py
 # → data/stock_agent.db 자동 생성
 # → Slack Bot (Socket Mode) + APScheduler 동시 시작
+```
+
+### 방법 3 — MCP 서버만 단독 실행
+
+Tool 레이어만 MCP 클라이언트(Claude Desktop 등)에 붙일 때 사용합니다.
+
+```bash
+python -m mcp_server.server   # stdio transport
+```
+
+### 테스트
+
+외부 네트워크나 API 키 없이 돌아갑니다.
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
 ---
