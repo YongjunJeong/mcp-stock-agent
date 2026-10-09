@@ -1,666 +1,151 @@
 # MCP Stock Agent
 
-한국 주식을 4개 관점(기술적, 펀더멘털, 매크로, 뉴스 감성)에서 각각 분석하고,
-PM 에이전트가 이를 종합해 Slack으로 알려주는 멀티에이전트 시스템입니다.
+**English** | [한국어](README.ko.md)
 
-데이터 수집은 MCP(Model Context Protocol) Tool로 분리했고, 분석과 종합은 Gemini 2.5 Flash가 맡습니다.
-워치리스트와 분석 기록은 SQLite에 저장하고, Slack 명령으로 워치리스트를 바꿀 수 있습니다.
+A Python analysis pipeline combining four specialist reports, deterministic score
+aggregation, persistent history and Slack delivery for Korean stock watchlists.
 
----
+The portfolio value is the integration and failure-handling code. Scores, weights
+and generated price targets are not validated investment predictions.
 
-## 데모
+## Problem and solution
 
-### 종목 분석
+A watchlist review involves price indicators, financial metrics, macro conditions
+and news. This project collects those inputs separately, runs specialist analyses
+concurrently and combines their outputs into a reviewable report.
 
-```
-사용자: @봇 삼성전자
+The PM stage retrieves the previous analysis, computes score changes, applies
+Python safety rules, requests a synthesis from Gemini and stores the new result.
+Slack supports analysis requests, watchlist changes and history lookup. A weekday
+scheduler checks the current watchlist hourly from 09:00 through 15:00 KST.
 
-봇:     🔍 `005930` 분석 중... (4개 전문가 Agent 실행)
+## Architecture
 
-        ⚠️ 삼성전자 (005930) 멀티에이전트 분석
-        ─────────────────────────────────────
-        현재가: 74,200 KRW          전일 대비: -0.93%
-        S&P500: 소폭 하락 (-0.43%)   VIX: ✅ 안정 (VIX 19.9)
-        ─────────────────────────────────────
-        📊 Final Score: 58.7/100 — 관망
-        `█████░░░░░` 58.7점
-        ↑ *전 분석(1일 전) 대비 +12.5점*  `관망 유지`
-
-        📈 기술적 분석  (×30%)    📋 펀더멘털 분석 (×35%)
-        `████████ ` 75점           `██░░░░░░` 25점
-
-        🌐 매크로 분석  (×20%)    📰 감성 분석     (×15%)
-        `████░░░░` 55점            `████░░░░` 60점
-        ─────────────────────────────────────
-        🏦 PM 종합 의견
-        기술적 분석상 박스권 돌파를 시도하며 MACD 상승 모멘텀이
-        긍정적이나, 펀더멘털 고평가(PER 15배 이상)와 Stress Zone
-        환율(1,441원)이 외국인 이탈 리스크를 높이고 있습니다.
-        전일 대비 기술적 점수가 +18점 상향된 주요 원인은 거래량
-        급증과 함께 20일선 상향 돌파가 확인됐기 때문입니다...
-
-        💰 ⏳ 관망 중 — 진입 시나리오
-        진입가: 70,000원 이하       보유기간: 중기 3~6개월
-        1차 목표가: 82,000원 (+17%)  2차 목표가: 92,000원 (+31%)
-        🛑 손절기준: 67,000원 (-4%, 120일선 하방 이탈 시)
-```
-
-### 워치리스트 관리
-
-```
-사용자: @봇 워치리스트
-봇:     📋 워치리스트 (3개)
-        • `005930`
-        • `000660`
-        • `035420`
-
-사용자: @봇 추가 035720
-봇:     ✅ `035720` 워치리스트에 추가됐습니다.
-
-사용자: @봇 히스토리 005930
-봇:     [ 005930 분석 히스토리 ]
-        ─────────────────────────────
-        `03-01 21:00`  *58.7점*  관망     Tech:75 Fund:25 Macro:55 Sent:60
-        `03-01 10:00`  *46.2점*  관망     Tech:57 Fund:15 Macro:55 Sent:50
-        `02-28 15:00`  *71.5점*  ★매수   Tech:75 Fund:70 Macro:65 Sent:74
-
-사용자: @봇 제거 035720
-봇:     🗑️ `035720` 워치리스트에서 제거됐습니다.
+```mermaid
+flowchart TD
+    S[Slack or scheduler] --> P[PM orchestration]
+    DB[(SQLite)] --> P
+    P --> T[Technical]
+    P --> F[Fundamental]
+    P --> M[Macro]
+    P --> N[News sentiment]
+    T --> D[Python data tools]
+    F --> D
+    M --> D
+    N --> D
+    T --> G[Gemini]
+    F --> G
+    M --> G
+    N --> G
+    P --> A[Weighted score and safety rules]
+    A --> R[Gemini synthesis and fallback]
+    R --> DB
+    R --> S
+    C[External MCP client] --> E[Separate stdio MCP server]
+    E --> D
 ```
 
----
-
-## 전체 아키텍처
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                      Slack Bot (Socket Mode)                          │
-│                                                                      │
-│  @봇 삼성전자          → 종목 파싱    → 분석 트리거                         │
-│  @봇 추가/제거/워치리스트 → 워치리스트  → DB CRUD                           │
-│  @봇 히스토리 005930   → 히스토리    → DB 조회 후 포맷                      │
-│  결과: Block Kit 카드 (↑↓ Memory 델타 배지 포함)                           │
-└────────────────────────┬─────────────────────────────────────────────┘
-                         │ 분석 요청
-                         ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                        PM Agent (종합 판단)                             │
-│                                                                      │
-│  ① 분석 시작 전  →  이전 기록 조회 (Memory Layer)                          │
-│  ② 4개 에이전트 병렬 실행 후 →  Delta 계산 (점수 변화량·신호 전환)              │
-│  ③ Gemini 프롬프트에 Delta 컨텍스트 주입                                   │
-│  ④ 분석 완료 후  →  결과를 analysis_history에 자동 저장                     │
-│                                                                      │
-│  Final_Score = Tech×0.30 + Fund×0.35 + Macro×0.20 + Sent×0.15        │
-│                                                                      │
-│  Safety Brake: USD/KRW ≥ 1,450 AND 3일 ROC > 1%                      │
-│  → buy_signal 강제 False, Final Score 상한 35점                         │
-│  매크로 조회 실패 시에도 buy_signal 보류 (fail-safe)                        │
-└──────┬───────────┬──────────────┬──────────────┬────────────────────┘
-       │           │              │              │
-       ▼           ▼              ▼              ▼
-  Technical    Fundamental      Macro        Sentiment
-  Agent        Agent            Agent        Agent
-  ───────────  ───────────      ──────────   ──────────
-  RSI·MACD     PER·EPS·PBR     USD/KRW      기업 뉴스
-  볼린저밴드   BPS·배당         VIX·S&P500   감성 분석
-  차트 패턴    Naver스크래핑    외국인수급    (매크로 제외)
-       │           │              │              │
-       └───────────┴──────────────┴──────────────┘
-                              │
-                              ▼
-        ┌─────────────────────────────────────────────┐
-        │           MCP Tool 레이어 (6개 도구)            │
-        │  price │ technical │ pattern │ fundamental  │
-        │  sentiment │ macro                          │
-        └──────────────────┬──────────────────────────┘
-                           │
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-       데이터 소스                 Gemini 2.5 Flash
-       ──────────────             ──────────────────
-       pykrx (KRX OHLCV)         에이전트당 1회 호출
-       Naver Finance API         thinking_budget=0
-       Frankfurter (환율)         temperature=0.3
-       yfinance (미국 시장)        전문가 1024 / PM 2048 토큰
-
-
-┌──────────────────────────────────────────────────────────────────────┐
-│                     SQLite DB (aiosqlite)                             │
-│                                                                      │
-│  watchlist          analysis_history                                 │
-│  ───────────────    ────────────────────────────────────             │
-│  ticker (PK)        id, ticker, analyzed_at (UTC ISO)                │
-│  added_at           final_score, buy_signal, signal_text             │
-│                     score_tech/fund/macro/sent                       │
-│                                                                      │
-│  ← Slack Bot 읽기/쓰기 (워치리스트 CRUD)                                  │
-│  ← APScheduler 읽기 (매 스캔마다 최신 목록 조회)                            │
-│  ← PM Agent 읽기/쓰기 (Memory Layer + 분석 결과 저장)                     │
-│  Docker named volume (stock_agent_data) → 재시작 후에도 보존             │
-└──────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────────┐
-│                  APScheduler (장중 자동 스캔)                            │
-│  평일 09:00 ~ 15:00 KST, 매 시간 정각                                    │
-│  DB에서 워치리스트 실시간 조회 → 전 종목 분석                                 │
-│  Final Score ≥ 70 → Slack 채널 자동 알림 (매수 신호)                       │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 에이전트 설계
-
-### 왜 5개 에이전트로 분리했나?
-
-하나의 프롬프트에 모든 분석을 넣으면 **페르소나 충돌**이 발생합니다.
-"매수 타이밍을 잡는 차트 분석가"와 "현금흐름 보수주의 가치 투자자"는 같은 종목에 대해 상충된 의견을 가집니다.
-에이전트를 분리하면 각자의 영역에서 독립적으로 판단하고, PM Agent가 합의점과 불일치를 명시적으로 종합합니다.
-
-| 에이전트 | 페르소나 | 가중치 | 주요 지표 |
-|---------|---------|--------|----------|
-| Technical | 20년 경력 차트 분석가 | ×30% | RSI(14), MACD(12/26/9), 볼린저밴드(20,2σ), 거래량비율, 이중바닥·역헤드앤숄더 패턴 |
-| Fundamental | 보수적 가치 투자자 | ×35% | PER, EPS, PBR, BPS, 배당수익률 (Naver Finance 스크래핑) |
-| Macro | 글로벌 매크로 전략가 | ×20% | USD/KRW 속도, VIX, S&P500, NASDAQ, KOSPI, 외국인 수급 |
-| Sentiment | 시장 심리 전문가 | ×15% | 기업 뉴스 감성 (매크로 뉴스 제외, 기업 이슈만 집중) |
-| **PM** | 헤지펀드 포트폴리오 매니저 | 종합 | 4개 리포트 종합 → 최종 의견 + 구체적 투자 전략 |
-
-### 가중치 설계 근거
-
-```
-Fundamental 35%  : 기업 내재가치가 장기 수익을 좌우한다고 봄
-Technical   30%  : 매수 타이밍과 단기 모멘텀
-Macro       20%  : 환율과 외국인 수급이 한국 증시 방향에 큰 영향
-Sentiment   15%  : 뉴스 노이즈가 많아 비중을 낮춤
-```
-
-### 매수 신호 임계값
-
-```
-Final Score ≥ 70  →  🚨 매수 신호 (Slack 알림 발송)
-Final Score 55~69 →  ⚠️ 관망 (진입 조건 시나리오 제공)
-Final Score < 55  →  ⚪ 관망/회피
-```
-
----
-
-## Memory Layer: 이전 분석과 비교
-
-분석 결과를 매번 SQLite에 저장하고, 다음 분석 때 직전 결과와의 차이를 PM 에이전트 프롬프트에 넣습니다.
-
-### 동작 흐름
-
-```
-run_full_analysis("005930") 호출
-        │
-        ▼
-① get_history("005930", limit=1)   ← 분석 시작 전 이전 기록 조회
-        │
-        ▼
-② 4개 서브에이전트 실행 → Final Score 계산
-        │
-        ▼
-③ _compute_delta(current, previous)
-   {
-     "has_prev": True,
-     "prev_score": 46.2,
-     "score_change": +12.5,          ← 점수 변화
-     "signal_changed": False,         ← 신호 전환 여부
-     "score_tech_change": +18,        ← 기술적 점수 변화
-     "analyzed_ago": "1일 전",
-   }
-        │
-        ▼
-④ Gemini 프롬프트에 Delta 컨텍스트 주입
-   [이전 분석 대비 변화] ← 1일 전 (2026-02-28)
-   - Final Score: 46.2점 → 58.7점 (+12.5점)
-   - 신호 변화: 관망 유지
-   - 세부 변화: 기술적 +18점 / 펀더멘털 +10점 / ...
-   위 변화를 고려해 점수 상승의 주요 원인을 한 문장으로 언급하세요.
-        │
-        ▼
-⑤ save_analysis(result)             ← 현재 분석 DB 저장
-```
-
-### Slack 표시
-
-**첫 분석 (이전 기록 없음)**:
-```
-📊 Final Score: 46.2/100 — 관망
-`████░░░░░░` 46.2점
-```
-
-**재분석 (신호 전환)**:
-```
-📊 Final Score: 72.0/100 — ★ 매수 신호
-`███████░░░` 72.0점
-↑ *전 분석(1일 전) 대비 +25.8점*  `관망 → ★ 매수 신호`
-```
-
----
-
-## DB 레이어 (SQLite + aiosqlite)
-
-### 스키마
-
-```sql
--- 워치리스트: 런타임에 Slack으로 추가/제거 가능
-CREATE TABLE watchlist (
-    ticker   TEXT PRIMARY KEY,
-    added_at TEXT NOT NULL        -- ISO-8601 UTC
-);
-
--- 모든 분석 결과 히스토리
-CREATE TABLE analysis_history (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker      TEXT NOT NULL,
-    analyzed_at TEXT NOT NULL,    -- ISO-8601 UTC
-    final_score REAL NOT NULL,
-    buy_signal  INTEGER NOT NULL, -- 0 / 1
-    signal_text TEXT NOT NULL,
-    score_tech  INTEGER NOT NULL,
-    score_fund  INTEGER NOT NULL,
-    score_macro INTEGER NOT NULL,
-    score_sent  INTEGER NOT NULL
-);
-
-CREATE INDEX idx_history_ticker_time ON analysis_history(ticker, analyzed_at DESC);
-```
-
-### DB 경로 자동 판단
-
-```python
-def _db_path() -> str:
-    if Path("/app/data").exists():      # Docker 환경
-        return "/app/data/stock_agent.db"
-    Path("./data").mkdir(exist_ok=True) # 로컬 개발
-    return "./data/stock_agent.db"
-```
-
-### 첫 실행 자동 시드
-
-앱 시작 시 `init_db()` 호출 → `watchlist` 테이블이 비어있으면 `WATCHLIST_KR` 환경변수를 파싱해 자동 삽입합니다. 이후 Slack 명령으로 추가/제거해도 재시작 시 초기화되지 않습니다.
-
-### Docker 데이터 영속성
-
-```yaml
-# docker-compose.yml
-volumes:
-  - stock_agent_data:/app/data   # named volume
-
-volumes:
-  stock_agent_data:
-    driver: local
-```
-
-`docker compose down --volumes` 를 명시적으로 실행하지 않는 한 컨테이너 재시작·재빌드에도 DB 보존됩니다.
-
----
-
-## Slack 워치리스트 관리
-
-### 명령어 전체 목록
-
-```
-@봇 삼성전자               회사명으로 종목 분석
-@봇 005930                종목코드로 분석
-@봇 하이닉스 분석해줘       자연어 입력 가능
-@봇 카카오 사도 돼?         자연어 입력 가능
-
-@봇 워치리스트              현재 워치리스트 목록 조회
-@봇 추가 005930            종목 추가
-@봇 추가 카카오             회사명으로도 추가 가능
-@봇 제거 005930            종목 제거 (삭제도 동의어)
-@봇 삭제 035420            동의어 지원
-@봇 히스토리 005930        최근 5회 분석 기록 조회
-
-@봇 도움                   전체 사용법 안내
-```
-
-### 런타임 반영 방식
-
-APScheduler는 스캔할 때마다 DB에서 워치리스트를 새로 읽습니다. 그래서 Slack으로 종목을 추가하거나 빼면 다음 정각 스캔부터 반영되고, 앱을 다시 띄울 필요가 없습니다.
-
-```python
-# scheduler/cron.py: 모듈 레벨 상수 대신 매번 DB 조회
-async def _run_watchlist_scan() -> None:
-    watchlist = await get_watchlist()   # 실시간 반영
-    for ticker in watchlist:
-        result = await run_full_analysis(ticker)
-        ...
-```
-
----
-
-## 설계 결정
-
-### 1. MCP(Model Context Protocol)를 Tool 레이어로
-
-```
-데이터 수집 책임 (MCP Tools)  ≠  분석·판단 책임 (Agents)
-```
-
-에이전트 내부에 데이터 수집 코드를 넣는 대신 모든 데이터 도메인을 MCP Tool로 분리했습니다.
-데이터 소스 교체(예: pykrx → 다른 API)가 에이전트 코드를 건드리지 않고 가능합니다.
-같은 Python 런타임을 공유하므로 네트워크 오버헤드 없이 직접 호출합니다.
-
-### 2. 환율 속도(Velocity) 우선 분석
-
-"1,400원 이상이면 위험" 같은 단일 기준 대신, 환율 수준과 변화 속도를 함께 봅니다. 구간이 올라갈수록 위험 가중치를 비선형으로 키웠습니다.
-
-```
-[환율 위험 구간]
-1,380 ~ 1,399원  →  New Normal Zone  (위험 가중치 ×1.0)
-1,400 ~ 1,449원  →  Stress Zone      (위험 가중치 ×2.5)
-1,450원 이상     →  Panic Zone       (위험 가중치 ×5.0)
-
-[속도 경보 (Velocity Alert)]
-3일 ROC > 1%                 →  패닉 셀링 전조 경보
-5일 MA 대비 3% 이상 이격     →  단기 급등 경보
-
-[Safety Brake: 매수 강제 차단]
-USD/KRW ≥ 1,450 AND 3일 ROC > 1%
-→ buy_signal = False 강제
-→ Final Score 상한 35점
-```
-
-원화 단독 약세도 따로 봅니다. USD/KRW가 오르는데 엔화는 강세라면
-글로벌 달러 강세가 아니라 한국 내부 요인일 가능성이 크다고 판단합니다.
-
-### 3. 매크로 vs 감성 도메인 분리
-
-뉴스 감성 분석에 환율이나 연준 뉴스까지 넣으면 매크로 신호가 두 번 반영됩니다.
-그래서 감성 에이전트 프롬프트에서 매크로 이슈를 명시적으로 제외했습니다.
-
-```
-# Sentiment Agent 시스템 프롬프트 (agents/sentiment_agent.py)
-- 환율, 금리, 글로벌 증시, 지정학적 리스크 등 매크로 이슈는 분석하지 마세요.
-  (해당 내용은 별도 매크로 에이전트가 담당합니다)
-- 오직 해당 종목·기업에 직접 관련된 뉴스만 평가합니다.
-```
-
-### 4. 구조화된 LLM 출력 파싱
-
-PM Agent는 자유 형식 리포트 끝에 정해진 형식의 전략 블록을 붙입니다. Slack 카드는 이 블록을 파싱해 표로 보여줍니다.
-
-```
-STRATEGY_START
-진입가: 73,000~75,000원 (분할매수 권장)
-목표가1: 85,000원 (+15%)
-목표가2: 95,000원 (+27%)
-손절기준: 69,000원 (-8%, 60일선 하방 이탈 시)
-보유기간: 중기 3~6개월
-STRATEGY_END
-```
-
-JSON 대신 마커와 `키: 값` 줄 형식을 쓴 건, 출력이 길어지면 LLM이 JSON 문법을 깨뜨리는 경우가 있어서입니다.
-
-### 5. VIX 공포 지수 연동
-
-```
-VIX < 20   →  ✅ 안정 (위험선호 정상, 신흥국 자금 유입 우호)
-VIX 20~25  →  🟡 경계 (변동성 확대 초기)
-VIX 25~30  →  ⚠️ 주의 (기관 헤지 증가)
-VIX ≥ 30   →  🚨 공포 (글로벌 리스크오프)
-VIX ≥ 35   →  ⛔ 극도 공포 (Safety Brake 복합 → 최고경보)
-```
-
-### 6. Gemini `thinking_budget=0` 설정
-
-Gemini 2.5 Flash는 기본적으로 출력 전 "thinking 토큰"을 소비합니다.
-제한된 출력 예산 하에서 thinking 토큰이 실제 분석 리포트를 잘리게 합니다.
-
-```python
-response = await client.aio.models.generate_content(
-    model="gemini-2.5-flash",
-    config=GenerateContentConfig(
-        thinking_config=ThinkingConfig(thinking_budget=0),  # thinking 끄기
-        temperature=0.3,
-        max_output_tokens=max_output_tokens,   # 전문가 1024 / PM 2048
-    ),
-)
-```
-
-### 7. 히스토리 저장 실패를 분석과 분리
-
-```python
-async def save_analysis(result: dict) -> None:
-    try:
-        ...  # DB 저장
-    except Exception as e:
-        logger.warning(f"히스토리 저장 실패 (무시됨): {e}")
-        # 예외를 밖으로 내보내지 않음. DB 오류로 분석 응답이 막히면 안 됨
-```
-
-DB에 문제가 생겨도 분석 결과는 정상적으로 Slack에 전달됩니다.
-
-### 8. 보조지표를 직접 계산
-
-RSI·MACD·볼린저밴드는 `mcp_server/indicators.py`에서 pandas로 직접 계산합니다.
-원래 `pandas-ta`를 썼지만 세 가지 이유로 걷어냈습니다.
-
-- 0.4 계열부터 import 시점에 `numba`가 필요해서, 기존 Dockerfile의 `--no-deps`
-  설치로는 동작하지 않았습니다. 컨테이너는 뜨지만 분석 요청마다 실패하는 상태였습니다.
-- ARM(aarch64) 휠 문제로 빌드가 반복적으로 깨졌습니다.
-- 실제로 쓰는 함수는 3개뿐입니다.
-
-계산 규약은 pandas-ta와 동일하게 맞췄고(RSI는 Wilder RMA, MACD의 EMA는 SMA 시드,
-볼린저는 표본표준편차), `tests/test_indicators.py`가 테스트 안의 독립 구현과
-대조해 검증합니다.
-
-### 9. async 함수 안의 동기 호출 제거
-
-`async def`로 선언해도 안에서 동기 I/O를 하면 이벤트 루프 전체가 멈춥니다.
-분석 한 건에 수 분이 걸리는데 그동안 Slack Socket Mode 하트비트와
-스케줄러가 같이 멈추는 상태였습니다.
-
-- Gemini: `client.models` → `client.aio.models`
-- pykrx(동기 라이브러리): `asyncio.to_thread`로 분리
-- 4개 전문가 에이전트: 서로 독립이므로 `asyncio.gather`로 병렬 실행
-  (`return_exceptions=True`로 하나가 실패해도 나머지로 분석을 이어감)
-
-### 10. 매크로 분석 결과 공유
-
-매크로 지표는 종목과 무관한데, 워치리스트 스캔은 종목마다 전체 분석을 돌립니다.
-캐시가 없으면 같은 데이터를 종목 수만큼 다시 수집하고 LLM도 매번 다시 호출합니다.
-같은 입력에도 LLM 점수는 조금씩 달라서, 한 스캔 안에서 종목끼리 비교할 때
-매크로 노이즈가 섞이는 문제도 있었습니다.
-
-`run_macro_agent()`는 TTL(기본 10분) 동안 결과를 공유하고, 동시에 들어온 요청은
-락으로 묶어 수집을 한 번만 합니다. 조회에 실패한 결과는 캐시하지 않습니다.
-실패를 캐시하면 fail-safe 때문에 TTL 내내 매수 신호가 보류되기 때문입니다.
-
----
-
-## 프로젝트 구조
-
-```
-mcp-stock-agent/
-│
-├── agents/                         # AI 에이전트 레이어
-│   ├── gemini_client.py            # Gemini 2.5 Flash 공유 클라이언트
-│   ├── technical_agent.py          # RSI · MACD · BB · 차트 패턴 분석
-│   ├── fundamental_agent.py        # PER · EPS · PBR · BPS 가치 분석
-│   ├── macro_agent.py              # 환율 · VIX · KOSPI · 외국인 수급 분석
-│   ├── sentiment_agent.py          # 기업 뉴스 감성 분석 (매크로 제외)
-│   └── pm_agent.py                 # 종합 판단 · Safety Brake · Memory Layer · 투자 전략
-│
-├── db/                             # DB 레이어 (SQLite + aiosqlite)
-│   ├── __init__.py
-│   └── database.py                 # init_db · watchlist CRUD · 분석 히스토리 저장/조회
-│
-├── mcp_server/                     # MCP Tool 레이어
-│   ├── server.py                   # MCP 서버 (6개 도구, stdio transport)
-│   ├── indicators.py               # RSI · MACD · 볼린저 (pandas 직접 계산)
-│   └── tools/
-│       ├── price.py                # OHLCV 데이터 (pykrx)
-│       ├── technical.py            # 기술적 지표 (indicators.py 사용)
-│       ├── pattern.py              # 차트 패턴 감지 (numpy 선형회귀)
-│       ├── fundamental.py          # 재무 지표 (Naver Finance 스크래핑)
-│       ├── sentiment.py            # 뉴스 감성 (Naver 모바일 JSON API)
-│       └── macro.py                # 매크로 지표 (Frankfurter · Naver · yfinance)
-│
-├── slack_bot/
-│   └── bot.py                      # Socket Mode 봇 · Block Kit UI · 워치리스트 명령 · Memory 델타 표시
-│
-├── scheduler/
-│   └── cron.py                     # APScheduler · 워치리스트 DB 조회 · 매수 신호 알림
-│
-├── data/                           # 런타임 DB (gitignore, Docker named volume 사용)
-│   └── stock_agent.db              # 자동 생성, 커밋하지 않음
-│
-├── tests/                          # pytest 스위트 (네트워크·API 키 불필요)
-│   ├── test_indicators.py          # 지표 수식 (독립 참조 구현과 대조)
-│   ├── test_slack_parsing.py       # 멘션·명령 파싱
-│   ├── test_scoring.py             # SCORE 추출 · 규칙 기반 폴백
-│   ├── test_macro.py               # 환율 구간 · 속도 경보 · 종합 신호
-│   ├── test_pm_agent.py            # 가중합 · Safety Brake · Delta
-│   ├── test_macro_agent.py         # 매크로 결과 캐시 (TTL · 동시 호출)
-│   ├── test_mcp_server.py          # tool 스키마 · stdio 채널 무결성
-│   ├── test_technical_tool.py      # 지표 파이프라인
-│   └── test_db.py                  # 워치리스트 CRUD · 히스토리
-│
-├── .github/workflows/ci.yml        # 린트 · 테스트 · 임포트 · Docker 빌드 검증
-├── main.py                         # 진입점 (init_db → 스케줄러 → Slack Bot)
-├── logging_config.py               # 엔트리포인트 공용 로깅 설정
-├── requirements.txt
-├── requirements-dev.txt
-├── pyproject.toml                  # ruff · pytest 설정
-├── Dockerfile                      # 멀티스테이지 빌드 (builder + runtime)
-├── docker-compose.yml              # named volume · 환경변수 주입 · 로그 순환
-├── .env.example                    # 환경변수 템플릿
-└── .gitignore
-```
-
----
-
-## 기술 스택
-
-| 영역 | 기술 | 선택 이유 |
-|------|-----|----------|
-| AI / LLM | Gemini 2.5 Flash | 무료 티어, 100만 토큰 컨텍스트, 빠른 속도 |
-| 에이전트 프로토콜 | MCP (Anthropic) | Tool 스키마 표준화, 에이전트-도구 분리 (스키마는 타입 힌트에서 자동 생성) |
-| Slack 연동 | slack-bolt (Socket Mode) | 공개 URL 불필요, WebSocket 기반 |
-| 스케줄러 | APScheduler | asyncio 네이티브, cron 문법 지원 |
-| DB | SQLite + aiosqlite | 서버리스, asyncio 비블로킹 I/O, 외부 의존성 없음 |
-| 환율 데이터 | Frankfurter API | 무료, ECB 기준, API 키 불필요 |
-| 미국 시장 | yfinance | S&P500·NASDAQ·VIX 무료 수집 |
-| 한국 시장 | pykrx + Naver Finance | OHLCV + 재무지표 (pykrx 재무 API 불안정 → Naver 스크래핑으로 대체) |
-| 비동기 HTTP | aiohttp | asyncio.gather로 병렬 데이터 수집 |
-| 기술적 지표 | pandas (자체 구현) | RSI, MACD, 볼린저밴드. 의존성을 줄이고 계산을 직접 검증하기 위해 |
-| 패턴 감지 | numpy | 이중바닥, 역헤드앤숄더, 삼각수렴 (선형회귀 기반) |
-| 컨테이너 | Docker + docker-compose | ARM/AMD64 멀티스테이지 빌드, 전 의존성 바이너리 휠(컴파일러 불필요) |
-| 테스트 · 린트 | pytest + pytest-asyncio, ruff | 네트워크·API 키 없이 실행, GitHub Actions에서 3.11/3.13 |
-
----
-
-## 데이터 소스 및 한계
-
-모든 소스는 무료입니다. KRX만 회원 가입이 필요합니다.
-
-| 데이터 | 소스 | 한계 |
-|-------|------|------|
-| 한국 주식 OHLCV | pykrx (KRX) | T+1 딜레이, KRX 데이터 포털 회원 로그인 필요 |
-| 한국 재무 지표 | Naver Finance (스크래핑) | pykrx 재무 API 서버 장애로 대체 |
-| 뉴스 감성 | Naver 모바일 JSON API | 한국어 뉴스만 |
-| USD/KRW, JPY/USD | Frankfurter (ECB) | ECB 공시 기준, 하루 딜레이 |
-| S&P500, NASDAQ, VIX | yfinance (Yahoo Finance) | 비공식 API, 간헐적 제한 가능 |
-| KOSPI, KOSDAQ | Naver 모바일 API | 15분 지연 |
-| 외국인 수급 | Naver Finance (스크래핑) | 일별 집계. 페이지 구조가 바뀌면 파싱 실패(로그 경고) |
-
-### 점수에 대해
-
-Final Score는 4개 에이전트가 LLM으로 매긴 점수의 고정 가중합입니다.
-가중치와 임계값(70)은 위에 적은 근거로 정한 값이고, 백테스트로 검증한 수치가 아닙니다.
-PM 리포트의 진입가·목표가·손절기준도 LLM 생성물이고 변동성 모델이나 포지션 사이징에
-기반하지 않습니다. 이 프로젝트는 멀티에이전트 오케스트레이션 구현 예제이지
-투자 판단 도구가 아닙니다.
-
----
-
-## 설치 및 실행
-
-### 환경변수 설정 (공통)
-
-```bash
-cp .env.example .env
-# .env 파일을 열어 실제 키 입력
-```
-
-```env
-GEMINI_API_KEY=AIza...
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
-SLACK_CHANNEL_ID=C...
-KRX_ID=...                           # KRX 데이터 포털 계정 (pykrx 시세 조회)
-KRX_PW=...
-WATCHLIST_KR=005930,000660,035420   # 첫 실행 시 DB 시드로 사용
-SIGNAL_THRESHOLD_STRONG=70
-```
-
-> KRX 계정이 필요합니다. pykrx는 1.2.5부터 KRX 데이터 포털(https://data.krx.co.kr)
-> 회원 로그인을 지원하고, 1.2.9 문서는 `KRX_ID`/`KRX_PW`를 필수로 명시합니다.
-> 계정 없이 시세 조회가 실패하면 기술적 에이전트는 중립 점수(50)로 처리되고
-> Slack 카드의 현재가는 N/A로 표시됩니다.
-
-### 방법 1: Docker (권장)
-
-```bash
+**The internal agents call Python tool functions directly.** They do not use an
+MCP client session and the LLM does not dynamically select tools. The same data
+functions are separately exposed as six MCP tools in `mcp_server/server.py`.
+This is a fixed async workflow with multiple model calls, rather than autonomous
+agent planning or distributed agent execution.
+
+## Engineering decisions
+
+| Decision | Implementation and trade-off |
+|---|---|
+| Parallel specialist work | `asyncio.gather(..., return_exceptions=True)` preserves sibling results; a failed specialist becomes a neutral score with an error report |
+| Deterministic aggregation | Python weights technical/fundamental/macro/sentiment scores by 30/35/20/15%; weights are policy choices without backtesting |
+| Explicit missing macro state | Missing currency alerts suppress the buy flag; safety-brake and panic-zone rules cap scores |
+| Bounded model retries | Shared async Gemini client makes up to two attempts; this is not a global request budget or circuit breaker |
+| Persistent comparison | SQLite stores the watchlist and score history; deltas are computed before saving the current result |
+| Separate MCP interface | Typed functions generate tool schemas; import-time output is redirected to stderr to preserve stdout JSON-RPC |
+| Single-process operation | Slack Socket Mode and APScheduler share a process; SQLite and a Docker volume avoid a separate database service |
+
+Read [`agents/pm_agent.py`](agents/pm_agent.py),
+[`agents/gemini_client.py`](agents/gemini_client.py),
+[`db/database.py`](db/database.py) and
+[`tests/test_mcp_server.py`](tests/test_mcp_server.py) for the implementation.
+
+## Getting started
+
+Python 3.11+ is required; the Docker image uses Python 3.13.
+
+```sh
 git clone https://github.com/YongjunJeong/mcp-stock-agent.git
 cd mcp-stock-agent
-cp .env.example .env   # 실제 키 입력
-
-docker compose up -d           # 백그라운드 실행
-docker compose logs -f         # 실시간 로그
-docker compose down            # 종료 (DB 데이터 보존)
-docker compose down --volumes  # 종료 + DB 완전 삭제
-```
-
-### 방법 2: Python 직접 실행 (로컬 개발용)
-
-```bash
-git clone https://github.com/YongjunJeong/mcp-stock-agent.git
-cd mcp-stock-agent
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # 실제 키 입력
-
-python main.py
-# → data/stock_agent.db 자동 생성
-# → Slack Bot (Socket Mode) + APScheduler 동시 시작
-```
-
-### 방법 3: MCP 서버만 단독 실행
-
-Tool 레이어만 MCP 클라이언트(Claude Desktop 등)에 붙일 때 사용합니다.
-
-```bash
-python -m mcp_server.server   # stdio transport
-```
-
-### 테스트
-
-외부 네트워크나 API 키 없이 돌아갑니다.
-
-```bash
-pip install -r requirements-dev.txt
-pytest -q
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ruff check .
 ```
 
----
+Tests cover scoring, indicators, failure rules, macro data parsing, SQLite, Slack
+parsing and real MCP stdio initialization/tool listing. They do not establish
+live market-data availability, model quality or successful Slack delivery.
 
-## 점수 계산 예시
+To run live integrations, copy [`.env.example`](.env.example) to `.env` and supply
+Gemini, Slack Bot/App tokens, a Slack channel ID and KRX credentials. Configure a
+Slack app for Socket Mode with `app_mentions:read`, `chat:write` and the
+`app_mention` event; its App token needs `connections:write`.
 
+```sh
+cp .env.example .env
+# Edit .env locally. Never commit credentials.
+python main.py
 ```
-삼성전자 (005930), 2026-03-01 기준
 
-기술적 분석:    75/100 × 0.30 = 22.5점   (MACD 상승, 박스권 돌파 시도)
-펀더멘털:       15/100 × 0.35 =  5.3점   (PER 15배↑, 배당수익률 낮음)
-매크로:         55/100 × 0.20 = 11.0점   (Stress Zone 환율 1,441원, VIX 안정)
-감성:           50/100 × 0.15 =  7.5점   (중립적 뉴스 흐름)
-                                ──────
-Final Score:                    46.2점  →  관망 (임계값: 70점)
+This starts the scheduler and Slack bot and can send messages and consume API
+quota. It is not an offline demo. `WATCHLIST_KR` seeds an empty watchlist; subsequent
+changes are read from SQLite. KRX access and public finance-page availability
+must be checked in your environment.
+
+For an external MCP client, start only the stdio tool server:
+
+```sh
+python -m mcp_server.server
 ```
 
+Docker deployment configuration is provided:
+
+```sh
+docker compose up -d
+docker compose logs -f
+docker compose down
+```
+
+The named volume retains the database. Docker configuration was inspected but
+not built or launched during the 2026-10-09 portfolio audit.
+
+## Validation and limitations
+
+In the current 2026-10-09 refinement, **155 tests passed** using the existing local Python 3.11 dependency environment.
+The existing GitHub Actions workflow defines lint, tests, MCP registration/import
+checks and Docker checks. A workflow definition is not evidence that every remote
+run passes.
+
+- Providers and scraped pages can fail or change independently of unit tests.
+- Neutral fallback scores permit partial analysis; they are not observations.
+  Missing macro alerts block the buy flag, but other missing inputs can still
+  contribute a neutral value to an otherwise high aggregate.
+- Specialists extract `SCORE` markers from text, rather than validating a typed
+  model response. Price targets and strategy text remain generated content.
+- Slack commands have no per-user authorization policy or per-user quotas.
+- There is no trading execution, portfolio sizing, historical performance
+  evaluation, multi-tenant isolation or distributed state management.
+- Requirement ranges are not a reproducible lockfile. Live requests send market
+  context to Gemini and reports to the configured Slack workspace.
+
+## Next improvements
+
+Add explicit completeness/provenance fields for partial analyses, then test the
+resulting decision policy. Introduce a credential-free synthetic end-to-end demo
+and measure request latency/cost on that fixed workload. Consider typed outputs,
+request budgets and Slack authorization before shared deployment.
+
+## Detailed reference
+
+The [English technical guide](docs/technical-guide.md) preserves configuration,
+implementation details, operation and troubleshooting from the original guide.
